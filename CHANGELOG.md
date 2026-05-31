@@ -14,4 +14,6 @@
 
 - "When I chat to the model now ... it responds with [gibberish] ... it worked before" — fixed: the WebGPU backend ran int8 (q8) weights and emitted garbage. The LLM now uses q4f16 on WebGPU (q8 on wasm).
 
+- "it takes a longgggg time before the text is being spoken ... and [the reply] is not what I would expect" — split inference into TWO parallel workers (LLM ‖ TTS) so the first sentence is synthesized while the model keeps generating: warm time-to-first-audio dropped to ~2.4s. Also anchored the tiny 135M model with few-shot examples + a stronger prompt + lower temperature so it stops confabulating a human persona. (For higher answer quality, switch to the 360M model in Settings.)
+
 - "The face does not animate at all ... only at point 8 does the face move and the karaoke text show" / "it speaks everything up to point 8 fine, THEN the face starts talking" — fixed: on-device inference on the main thread was starving the render loop, so the face/captions only caught up at the end while audio played. Moved BOTH the LLM and Kokoro into a Web Worker (sharing one transformers instance) so the main thread stays free and the face animates in sync with speech. Also made the LLM default to CPU so the GPU stays dedicated to the 3D face.

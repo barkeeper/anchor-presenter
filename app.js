@@ -25,8 +25,17 @@ const VOICES = [
 const DTYPE_FILE = { q8: 'model_quantized.onnx', q4f16: 'model_q4f16.onnx', fp16: 'model_fp16.onnx', fp32: 'model.onnx' };
 const SYSTEM = {
   role: 'system',
-  content: 'You are Anchor, a warm, concise on-screen presenter. Reply in plain spoken sentences (no markdown, lists, headings or emoji) so your words sound natural read aloud. Keep it to a sentence or two unless asked for more.',
+  content: 'You are Anchor, a friendly AI assistant shown as an on-screen presenter. You are an AI: you have no job, boss, or personal life, so never invent personal stories or events. Answer the user\'s message directly and stay on topic. Reply in one or two short, plain spoken sentences (no markdown, lists, headings or emoji) so it sounds natural read aloud.',
 };
+// Few-shot exemplars anchor the tiny 135M model to concise, on-topic, no-persona replies.
+const FEWSHOT = [
+  { role: 'user', content: 'Hi, how are you?' },
+  { role: 'assistant', content: "Hi! I'm doing well, thanks for asking. What can I help you with today?" },
+  { role: 'user', content: 'What is the capital of France?' },
+  { role: 'assistant', content: 'The capital of France is Paris.' },
+  { role: 'user', content: 'Tell me a fun fact.' },
+  { role: 'assistant', content: 'Honey never spoils — archaeologists have found pots of it in ancient tombs that are still edible.' },
+];
 
 const settings = {
   voice: localStorage.getItem('anchor.voice') || 'af_heart',
@@ -124,7 +133,7 @@ function restoreChat() {
   if (!history.length) addMsg('system', `Local in-browser presenter · ${CFG.mode.toUpperCase()} mode. Type or hit 🎙 — first run downloads & caches the models.`);
   else for (const m of history) addMsg(m.role, m.content);
 }
-const getMessages = () => [SYSTEM, ...history.slice(-12)];
+const getMessages = () => [SYSTEM, ...FEWSHOT, ...history.slice(-12)];
 function updateDevTag(device, dtype) { el.devTag.hidden = false; el.devTag.textContent = dtype ? `${device} ${dtype}` : device; }
 
 // ---------- modules ----------
@@ -138,7 +147,8 @@ const inference = createInference({
   onLoaded: (device, dtype) => updateDevTag(device, dtype),
   onToken: (clean) => { if (!pending) return; if (pending.first) { pending.bubble.textContent = ''; pending.first = false; } pending.bubble.textContent = clean; scrollBottom(); if (clean.length - pending.moodLen > 28) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); pending.moodLen = clean.length; } },
   onAudio: (chunk) => speech.enqueue(chunk),
-  onDone: (reply) => { if (!pending) return; pending.bubble.textContent = reply; history.push({ role: 'assistant', content: reply }); saveHistory(history); const m = detectMood(reply); face?.setMood(m.mood, m.intensity); speech.end(); setStatus('ready'); setLED('ready'); setBusy(false); pending = null; },
+  onSpeechEnd: () => speech.end(),
+  onDone: (reply) => { if (!pending) return; pending.bubble.textContent = reply; history.push({ role: 'assistant', content: reply }); saveHistory(history); const m = detectMood(reply); face?.setMood(m.mood, m.intensity); setStatus('ready'); setLED('ready'); setBusy(false); pending = null; },
   onError: (errMsg) => { console.error('infer:', errMsg); if (pending) { renderError(pending.bubble, pending.userText, errMsg); pending = null; } else { setStatus('error'); } speech.cancel(); setOnAir('idle'); setLED('err'); setBusy(false); showOverlay(false); },
 });
 
@@ -221,7 +231,7 @@ function llmFileList() {
   return ['config.json', 'generation_config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt', `onnx/${DTYPE_FILE[settings.dtype] || DTYPE_FILE.q8}`].map((f) => base + f);
 }
 function buildPrecacheList() {
-  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './infer-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js'];
+  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './llm-worker.js', './tts-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js'];
   const core = CFG.mode === 'online' ? 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js' : './vendor/three/build/three.core.js';
   const libs = [A.three, core, A.transformers, A.kokoro, A.phonemizer, A.face,
     A.addons + 'environments/RoomEnvironment.js', A.addons + 'loaders/GLTFLoader.js', A.addons + 'loaders/KTX2Loader.js',
