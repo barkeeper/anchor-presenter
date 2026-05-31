@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>ANCHOR — local AI presenter (single file)</title>
+  <meta name="theme-color" content="#0a0b0d" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+/* ============================================================
+   ANCHOR — analog broadcast desk for a local AI presenter
+   ============================================================ */
+:root[data-theme="dark"]{
+  --bg:#0a0b0d; --bg2:#0e1014; --grain:#ffffff;
+  --panel:#13161c; --panel2:#0f1217; --line:#252b34; --line2:#323a46;
+  --ink:#ece8df; --ink-dim:#b9bcc4; --muted:#7e8693;
+  --amber:#f0a93b; --amber-ink:#1a1206; --teal:#46d6c0; --red:#e75a40; --green:#46d6c0;
+  --shadow:0 30px 80px #00000077; --glow:0 0 0 1px #00000040;
+  --vignette: radial-gradient(120% 90% at 50% -10%, #1a1f2900, #00000088 100%);
+  --scan: rgba(255,255,255,.022);
+}
+:root[data-theme="light"]{
+  --bg:#e9e2d3; --bg2:#e1d8c6; --grain:#5a4a2a;
+  --panel:#faf6ec; --panel2:#f1ead9; --line:#d8ccb6; --line2:#c8b896;
+  --ink:#1d1a14; --ink-dim:#43403a; --muted:#766c5a;
+  --amber:#b96d12; --amber-ink:#fff7ea; --teal:#147f72; --red:#c4452a; --green:#147f72;
+  --shadow:0 24px 60px #5a4a2a33; --glow:0 0 0 1px #00000010;
+  --vignette: radial-gradient(120% 90% at 50% -10%, #ffffff00, #8a763f22 100%);
+  --scan: rgba(60,45,20,.03);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family:"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color:var(--ink);
+  background:
+    var(--vignette),
+    radial-gradient(900px 520px at 12% -8%, color-mix(in srgb, var(--amber) 14%, transparent), transparent 60%),
+    radial-gradient(820px 520px at 100% 0%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 55%),
+    linear-gradient(180deg, var(--bg2), var(--bg));
+  min-height:100vh; overflow:hidden;
+}
+body::after{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:90;
+  background:repeating-linear-gradient(0deg, var(--scan) 0 1px, transparent 1px 3px);
+  mix-blend-mode:soft-light; opacity:.6;
+}
+code, .mono{ font-family:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.bar{
+  position:relative; z-index:20;
+  display:flex; align-items:center; justify-content:space-between; gap:18px;
+  padding:14px 22px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, color-mix(in srgb, var(--panel) 88%, transparent), transparent);
+  backdrop-filter:blur(8px);
+}
+.brand{display:flex; align-items:center; gap:14px; min-width:0}
+.sigil{
+  width:40px; height:40px; border-radius:11px; flex:0 0 auto;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb,var(--amber) 85%,white), transparent 55%),
+    conic-gradient(from 200deg, var(--teal), var(--amber), var(--teal));
+  display:grid; place-items:center;
+  box-shadow: inset 0 0 0 1px #ffffff22, 0 8px 24px color-mix(in srgb,var(--amber) 30%, transparent);
+}
+.sigil span{ width:13px; height:13px; border-radius:50%; background:var(--bg); box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ink) 40%,transparent); }
+.brandtext{min-width:0}
+h1{ margin:0; font-family:"Fraunces", Georgia, serif; font-weight:600; font-size:23px; letter-spacing:.10em; line-height:1; color:var(--ink); }
+.sub{margin:5px 0 0; font-size:11.5px; letter-spacing:.04em; color:var(--muted)}
+.controls{display:flex; align-items:center; gap:12px; flex:0 0 auto}
+
+.iconbtn{
+  display:grid; place-items:center; width:38px; height:38px; border-radius:11px;
+  border:1px solid var(--line2); background:var(--panel2); color:var(--ink-dim);
+  cursor:pointer; transition:transform .05s, border-color .2s, background .2s;
+}
+.iconbtn:hover{ border-color:var(--amber); color:var(--ink) }
+.iconbtn:active{ transform:translateY(1px) }
+.iconbtn--sm{ width:32px; height:32px; border-radius:9px }
+.themeglyph, .muteglyph{ width:16px; height:16px; display:block; position:relative }
+.themeglyph::before{ content:"\263E"; font-size:16px; line-height:16px; }
+[data-theme="light"] .themeglyph::before{ content:"\2600"; }
+.muteglyph::before{ content:"\1F50A"; font-size:14px; }
+.muteglyph[data-muted="1"]::before{ content:"\1F507"; }
+.glyph-gear::before{ content:"\2699"; font-size:17px; }
+.glyph-mic::before{ content:"\1F3A4"; font-size:16px; }
+.tag--dev{ background:color-mix(in srgb,var(--ink) 12%,transparent); color:var(--ink-dim); border:1px solid var(--line2); text-transform:uppercase }
+
+.composer{ align-items:flex-end }
+.iconbtn--mic{ width:46px; height:46px; flex:0 0 auto; align-self:stretch }
+.iconbtn--mic.rec{ border-color:var(--red); color:var(--red); animation:pulse 1s infinite; box-shadow:0 0 0 4px color-mix(in srgb,var(--red) 18%,transparent) }
+.composer__send{ display:flex; flex-direction:column; gap:8px; align-self:stretch }
+.btn--stop{ background:color-mix(in srgb,var(--red) 18%,transparent); border-color:color-mix(in srgb,var(--red) 45%,transparent); color:var(--red); font-weight:600 }
+.btn--tiny{ padding:3px 9px; font-size:11px; border-radius:8px; margin-left:4px }
+
+.caption{ pointer-events:none; max-width:90%; margin:0 auto 8px; text-align:center;
+  font-family:"Fraunces",serif; font-size:18px; line-height:1.35; color:var(--ink);
+  text-shadow:0 2px 14px #000a, 0 0 2px #0008; opacity:0; transform:translateY(6px);
+  transition:opacity .2s ease, transform .2s ease }
+.caption.show{ opacity:1; transform:none }
+.caption span{ opacity:.45; transition:opacity .12s, color .12s }
+.caption span.said{ opacity:.7 }
+.caption span.now{ opacity:1; color:var(--amber) }
+[data-theme="light"] .caption{ color:#fff; text-shadow:0 2px 12px #0009 }
+[data-theme="light"] .caption span.now{ color:var(--amber) }
+
+.drawer{ position:fixed; inset:0; z-index:80; pointer-events:none }
+.drawer__scrim{ position:absolute; inset:0; background:color-mix(in srgb,var(--bg) 55%,transparent); backdrop-filter:blur(4px); opacity:0; transition:opacity .25s }
+.drawer__panel{ position:absolute; top:0; right:0; height:100%; width:min(380px,92vw);
+  transform:translateX(102%); transition:transform .3s cubic-bezier(.4,1.1,.5,1);
+  background:linear-gradient(180deg,var(--panel),var(--panel2)); border-left:1px solid var(--line2);
+  box-shadow:var(--shadow); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:18px }
+.drawer.open{ pointer-events:auto }
+.drawer.open .drawer__scrim{ opacity:1 }
+.drawer.open .drawer__panel{ transform:none }
+.drawer__head{ display:flex; align-items:center; justify-content:space-between }
+.drawer__head h2{ margin:0; font-family:"Fraunces",serif; font-weight:600; font-size:20px; letter-spacing:.02em }
+.set{ display:flex; flex-direction:column; gap:8px }
+.set--grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
+.set__row{ display:flex; align-items:center; justify-content:space-between; font-size:13px; color:var(--ink-dim) }
+.set--actions{ margin-top:auto; gap:10px; border-top:1px solid var(--line); padding-top:16px }
+.select--block{ width:100%; padding:9px 11px; border:1px solid var(--line2); border-radius:11px; background:var(--bg2); background-position:right 10px center, right 14px center }
+.btn--wide{ width:100%; padding:11px; justify-content:center }
+input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:99px; background:linear-gradient(90deg,var(--amber),var(--teal)); outline:none }
+input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:var(--ink); border:2px solid var(--panel); box-shadow:0 2px 6px #0006; cursor:pointer }
+
+.statuspill{ display:flex; align-items:center; gap:9px; padding:8px 13px; border-radius:999px; border:1px solid var(--line2); background:var(--panel2);
+  font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.06em; color:var(--ink-dim); }
+.led{ width:8px; height:8px; border-radius:50%; background:var(--amber); box-shadow:0 0 0 4px color-mix(in srgb,var(--amber) 18%,transparent); transition:.2s }
+.led.ready{ background:var(--green); box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 18%,transparent) }
+.led.busy{ background:var(--amber); animation:pulse 1s infinite }
+.led.err{ background:var(--red); box-shadow:0 0 0 4px color-mix(in srgb,var(--red) 18%,transparent) }
+@keyframes pulse{ 50%{ opacity:.35 } }
+
+.banner{ position:relative; z-index:15; margin:0; padding:10px 22px; font-size:12.5px; letter-spacing:.02em; color:var(--amber-ink);
+  background:linear-gradient(180deg, color-mix(in srgb,var(--amber) 86%,white), var(--amber)); border-bottom:1px solid color-mix(in srgb,var(--amber) 60%, black); }
+
+.stage{ position:relative; z-index:10; display:grid; grid-template-columns: 1.15fr .85fr; gap:16px; padding:16px 22px 22px; height:calc(100vh - 71px); }
+.panel{ position:relative; border:1px solid var(--line); border-radius:18px; background:linear-gradient(180deg, var(--panel), var(--panel2)); box-shadow:var(--shadow), var(--glow); overflow:hidden; min-height:0; }
+
+.viewport{ display:block }
+#face{ position:absolute; inset:0; width:100%; height:100%; display:block }
+.viewport::before{ content:""; position:absolute; inset:0; pointer-events:none; z-index:2; background:radial-gradient(120% 70% at 50% -20%, color-mix(in srgb,var(--ink) 6%,transparent), transparent 60%); }
+.hud{ position:absolute; inset:0; z-index:3; display:flex; flex-direction:column; justify-content:space-between; pointer-events:none; padding:14px }
+.hud__top{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px }
+.hud__right{ display:flex; align-items:center; gap:8px; pointer-events:auto }
+.onair{ display:flex; align-items:center; gap:8px; padding:7px 12px; border-radius:999px;
+  background:color-mix(in srgb,var(--panel) 70%, transparent); border:1px solid var(--line2); backdrop-filter:blur(6px);
+  font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.18em; color:var(--ink-dim); }
+.onair__dot{ width:9px; height:9px; border-radius:50%; background:var(--muted); transition:.2s }
+.onair.live{ color:var(--ink) }
+.onair.live .onair__dot{ background:var(--red); box-shadow:0 0 12px var(--red); animation:pulse .9s infinite }
+.onair.think .onair__dot{ background:var(--amber); box-shadow:0 0 12px var(--amber); animation:pulse 1s infinite }
+.field{ display:flex; align-items:center; gap:7px; background:color-mix(in srgb,var(--panel) 70%, transparent); border:1px solid var(--line2); border-radius:10px; padding:5px 9px; backdrop-filter:blur(6px) }
+.field__lbl{ font-family:"JetBrains Mono",monospace; font-size:9.5px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase }
+.select{ appearance:none; border:none; background:transparent; color:var(--ink); font:inherit; font-size:12px; padding-right:14px; cursor:pointer; outline:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:right 2px center, right 6px center; background-size:4px 4px,4px 4px; background-repeat:no-repeat; }
+.select option{ background:var(--panel); color:var(--ink) }
+.hud__bottom{ display:flex; flex-direction:column; gap:6px }
+.wave{ width:100%; height:46px; opacity:.9 }
+.viewport__fallback{ position:absolute; inset:0; z-index:4; display:grid; place-items:center; padding:30px; text-align:center; color:var(--muted); font-size:13px; line-height:1.6; }
+
+.console{ display:flex; flex-direction:column; min-height:0 }
+.console__head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg, color-mix(in srgb,var(--panel) 80%, transparent), transparent); }
+.meta{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); min-width:0 }
+.meta code{ font-size:11px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px }
+.tag{ font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:.12em; padding:3px 6px; border-radius:6px;
+  background:color-mix(in srgb,var(--amber) 22%,transparent); color:var(--amber); border:1px solid color-mix(in srgb,var(--amber) 40%,transparent) }
+.tag--alt{ background:color-mix(in srgb,var(--teal) 20%,transparent); color:var(--teal); border-color:color-mix(in srgb,var(--teal) 38%,transparent) }
+.console__actions{ display:flex; gap:8px; flex:0 0 auto }
+.btn{ appearance:none; cursor:pointer; font:inherit; font-size:12px; letter-spacing:.04em; padding:8px 14px; border-radius:11px; border:1px solid var(--line2);
+  background:var(--panel2); color:var(--ink); transition:transform .05s, border-color .2s, background .2s; }
+.btn:hover{ border-color:var(--amber) }
+.btn:active{ transform:translateY(1px) }
+.btn:disabled{ opacity:.5; cursor:not-allowed }
+.btn--ghost{ background:transparent }
+.btn--send{ background:linear-gradient(180deg, color-mix(in srgb,var(--amber) 92%,white), var(--amber)); color:var(--amber-ink); border-color:transparent; font-weight:600; box-shadow:0 6px 18px color-mix(in srgb,var(--amber) 35%,transparent); }
+.btn--send:disabled{ box-shadow:none }
+
+.chat{ flex:1; overflow:auto; padding:16px; min-height:0; scrollbar-width:thin }
+.chat::-webkit-scrollbar{ width:9px } .chat::-webkit-scrollbar-thumb{ background:var(--line2); border-radius:99px }
+.msg{ display:flex; gap:12px; margin:14px 0 }
+.msg__role{ flex:0 0 auto; width:30px; height:30px; border-radius:9px; display:grid; place-items:center;
+  font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.04em; border:1px solid var(--line2); background:var(--panel2); color:var(--muted) }
+.msg.user .msg__role{ color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%,transparent) }
+.msg.assistant .msg__role{ color:var(--teal); border-color:color-mix(in srgb,var(--teal) 45%,transparent) }
+.bubble{ border:1px solid var(--line); border-radius:0 14px 14px 14px; padding:11px 14px; line-height:1.5; font-size:14px; white-space:pre-wrap; max-width:62ch; background:var(--panel2); }
+.msg.user .bubble{ background:color-mix(in srgb,var(--amber) 10%,var(--panel2)); border-color:color-mix(in srgb,var(--amber) 28%,transparent) }
+.msg.assistant .bubble{ background:color-mix(in srgb,var(--teal) 9%,var(--panel2)); border-color:color-mix(in srgb,var(--teal) 26%,transparent) }
+.msg.system .bubble{ font-style:italic; color:var(--ink-dim); border-style:dashed; border-radius:12px }
+.typing{ display:inline-flex; gap:5px; align-items:center; padding:2px 0 }
+.typing span{ width:6px; height:6px; border-radius:50%; background:var(--teal); animation:bounce 1.1s infinite ease-in-out; opacity:.7 }
+.typing span:nth-child(2){ animation-delay:.15s } .typing span:nth-child(3){ animation-delay:.3s }
+@keyframes bounce{ 0%,80%,100%{ transform:translateY(0); opacity:.5 } 40%{ transform:translateY(-5px); opacity:1 } }
+.composer{ display:flex; gap:10px; padding:12px; border-top:1px solid var(--line); background:linear-gradient(180deg, transparent, color-mix(in srgb,var(--panel2) 60%,transparent)) }
+textarea{ flex:1; min-height:52px; max-height:160px; resize:vertical; font:inherit; font-size:14px; border-radius:13px; border:1px solid var(--line2); background:var(--bg2); color:var(--ink); padding:11px 13px; outline:none; transition:border-color .2s, box-shadow .2s; }
+textarea:focus{ border-color:color-mix(in srgb,var(--amber) 60%,transparent); box-shadow:0 0 0 4px color-mix(in srgb,var(--amber) 16%,transparent) }
+.composer .btn--send{ align-self:stretch; min-width:84px }
+
+.overlay{ position:fixed; inset:0; z-index:100; display:none; align-items:center; justify-content:center; padding:22px; background:color-mix(in srgb,var(--bg) 72%, transparent); backdrop-filter:blur(10px) }
+.overlay.show{ display:flex }
+.modal{ width:min(560px,100%); border:1px solid var(--line2); border-radius:20px; padding:18px; background:linear-gradient(180deg, var(--panel), var(--panel2)); box-shadow:var(--shadow) }
+.modal__top{ display:flex; align-items:center; gap:14px }
+.ring{ width:46px; height:46px; border-radius:50%; flex:0 0 auto; background:conic-gradient(var(--amber) var(--p,0%), color-mix(in srgb,var(--ink) 12%,transparent) 0); display:grid; place-items:center }
+.ring::after{ content:""; width:34px; height:34px; border-radius:50%; background:var(--panel) }
+.modal__txt{ flex:1; min-width:0 }
+.modal__title{ font-family:"Fraunces",serif; font-weight:600; font-size:16px; letter-spacing:.01em }
+.modal__line{ font-size:12px; color:var(--muted); margin-top:3px }
+.modal__pct{ font-family:"JetBrains Mono",monospace; font-size:14px; color:var(--amber) }
+.modal__bar{ margin-top:15px; height:9px; border-radius:99px; background:color-mix(in srgb,var(--ink) 10%,transparent); overflow:hidden; border:1px solid var(--line) }
+.modal__fill{ height:100%; width:var(--w,0%); background:linear-gradient(90deg, var(--amber), var(--teal)); transition:width .15s ease }
+.modal__row{ margin-top:9px; display:flex; justify-content:space-between; gap:10px; font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--muted) }
+.modal__hint{ margin-top:9px; font-size:11.5px; color:var(--muted) }
+
+@media (max-width: 900px){
+  body{ overflow:auto }
+  .stage{ grid-template-columns:1fr; height:auto }
+  .viewport{ height:46vh }
+  .console{ height:62vh }
+  h1{ font-size:19px }
+  .sub{ display:none }
+}
+  </style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <div class="sigil" aria-hidden="true"><span></span></div>
+    <div class="brandtext">
+      <h1>ANCHOR</h1>
+      <p class="sub">a local AI presenter · chat → kokoro voice → living face</p>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="themeglyph"></span></button>
+    <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="glyph-gear"></span></button>
+    <div class="statuspill" title="Runtime status"><span id="led" class="led"></span><span id="status">idle</span></div>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main class="stage">
+  <section class="panel viewport">
+    <canvas id="face"></canvas>
+    <div class="hud">
+      <div class="hud__top">
+        <div class="onair" id="onair"><span class="onair__dot"></span><span id="onairTxt">STANDBY</span></div>
+        <div class="hud__right">
+          <label class="field"><span class="field__lbl">voice</span><select id="voice" class="select"></select></label>
+          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice"><span class="muteglyph"></span></button>
+        </div>
+      </div>
+      <div class="hud__bottom">
+        <div id="caption" class="caption" aria-live="polite"></div>
+        <canvas id="wave" class="wave"></canvas>
+      </div>
+    </div>
+    <div class="viewport__fallback" id="faceFallback" hidden></div>
+  </section>
+
+  <section class="panel console">
+    <div class="console__head">
+      <div class="meta">
+        <span class="tag">LLM</span><code id="llmId">—</code>
+        <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
+        <span class="tag tag--dev" id="devTag" hidden>—</span>
+      </div>
+      <div class="console__actions">
+        <button class="btn" id="preload">warm up</button>
+        <button class="btn btn--ghost" id="reset">reset</button>
+      </div>
+    </div>
+    <div id="chat" class="chat" aria-live="polite"></div>
+    <div class="composer">
+      <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="glyph-mic"></span></button>
+      <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter newline · 🎙 to talk"></textarea>
+      <div class="composer__send">
+        <button class="btn btn--stop" id="stopBtn" title="Stop speaking" hidden>stop</button>
+        <button class="btn btn--send" id="send" disabled>send</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="settingsPanel" class="drawer" aria-hidden="true">
+  <div class="drawer__scrim" data-close></div>
+  <aside class="drawer__panel" role="dialog" aria-label="Settings">
+    <div class="drawer__head"><h2>Settings</h2><button class="iconbtn iconbtn--sm" data-close aria-label="Close">✕</button></div>
+    <div class="set">
+      <label class="set__row" for="voiceSel"><span>Voice</span></label>
+      <select id="voiceSel" class="select select--block"></select>
+    </div>
+    <div class="set">
+      <label class="set__row"><span>Speaking rate</span><span class="mono" id="speedVal">1.00×</span></label>
+      <input type="range" id="speed" min="0.6" max="1.4" step="0.05" value="1" />
+    </div>
+    <div class="set">
+      <label class="set__row" for="modelSel"><span>Language model</span></label>
+      <select id="modelSel" class="select select--block"></select>
+    </div>
+    <div class="set set--grid">
+      <div><label class="set__row" for="dtypeSel"><span>Precision</span></label>
+        <select id="dtypeSel" class="select select--block">
+          <option value="q8">q8 (small)</option>
+          <option value="q4f16">q4f16</option>
+          <option value="fp16">fp16</option>
+          <option value="fp32">fp32 (best)</option>
+        </select></div>
+      <div><label class="set__row" for="deviceSel"><span>Compute</span></label>
+        <select id="deviceSel" class="select select--block">
+          <option value="wasm">CPU · wasm</option>
+          <option value="webgpu">WebGPU</option>
+        </select></div>
+    </div>
+    <div class="set set--actions">
+      <button class="btn btn--ghost btn--wide" id="clearBtn">Clear conversation</button>
+    </div>
+  </aside>
+</div>
+
+<div id="overlay" class="overlay" aria-hidden="true">
+  <div class="modal">
+    <div class="modal__top">
+      <div class="ring" id="ring" style="--p:0%"></div>
+      <div class="modal__txt"><div class="modal__title" id="ovTitle">loading…</div><div class="modal__line" id="ovLine">preparing</div></div>
+      <div class="modal__pct" id="ovPct">0%</div>
+    </div>
+    <div class="modal__bar"><div id="barFill" class="modal__fill" style="--w:0%"></div></div>
+    <div class="modal__row"><span id="ovFile">—</span><span id="ovBytes">—</span></div>
+    <div class="modal__hint" id="ovHint">First run downloads model weights and caches them in the browser.</div>
+  </div>
+</div>
+
+<!-- ===== inference workers (not executed here; turned into Blob module workers) ===== -->
+<script type="text/worker" id="src-llm-worker">
+let tf = null, gen = null, llmKey = '', usedDevice = '', usedDtype = '', current = null;
+const MODELS = { '135m': 'HuggingFaceTB/SmolLM2-135M-Instruct', '360m': 'HuggingFaceTB/SmolLM2-360M-Instruct' };
+const post = (m) => self.postMessage(m);
+const gpuSafe = (d) => (['q8', 'int8', 'uint8'].includes(d) ? 'q4f16' : d);
+async function resolveDevice(pref) {
+  if (pref !== 'webgpu') return 'wasm';
+  try { const a = await navigator.gpu?.requestAdapter?.(); return a ? 'webgpu' : 'wasm'; } catch { return 'wasm'; }
+}
+async function init(d) {
+  tf = await import(d.urls.transformers);
+  const env = tf.env;
+  env.allowLocalModels = !!d.offline; env.allowRemoteModels = !d.offline;
+  if (d.offline && d.urls.localModelPath) env.localModelPath = d.urls.localModelPath;
+  env.backends.onnx.wasm.wasmPaths = d.urls.wasm;
+  post({ type: 'ready' });
+}
+async function ensureLLM(opts) {
+  const id = MODELS[opts.modelKey] || MODELS['135m'];
+  const dev = await resolveDevice(opts.device);
+  const eff = dev === 'webgpu' ? gpuSafe(opts.dtype) : opts.dtype;
+  const wantKey = `${id}|${eff}|${dev}`;
+  if (gen && llmKey === wantKey) return;
+  if (gen) { try { await gen.dispose?.(); } catch {} gen = null; }
+  llmKey = wantKey;
+  const prog = (info) => post({ type: 'progress', phase: 'llm', info });
+  const build = (dvc, dt) => tf.pipeline('text-generation', id, { dtype: dt, device: dvc, progress_callback: prog });
+  try { gen = await build(dev, eff); usedDevice = dev; usedDtype = eff; }
+  catch (e) { if (dev === 'wasm') throw e; llmKey = `${id}|${opts.dtype}|wasm`; gen = await build('wasm', opts.dtype); usedDevice = 'wasm'; usedDtype = opts.dtype; }
+}
+async function generate(d) {
+  await ensureLLM(d.opts);
+  post({ type: 'loaded', device: usedDevice, dtype: usedDtype });
+  const session = { cancelled: false }; current = session;
+  const stopper = new tf.InterruptableStoppingCriteria(); session.stop = () => stopper.interrupt();
+  const prompt = gen.tokenizer.apply_chat_template(d.messages, { tokenize: false, add_generation_prompt: true });
+  let full = '';
+  const streamer = new tf.TextStreamer(gen.tokenizer, {
+    skip_prompt: true, skip_special_tokens: true,
+    callback_function: (p) => {
+      if (session.cancelled || !p) return;
+      const piece = p.split('<|im_end|>')[0]; full += piece;
+      post({ type: 'piece', piece, clean: full.split('<|im_end|>')[0].split('<|im_start|>')[0] });
+    },
+  });
+  try { await gen(prompt, { max_new_tokens: d.opts.maxTokens ?? 120, temperature: 0.3, repetition_penalty: 1.2, return_full_text: false, streamer, stopping_criteria: stopper }); }
+  catch (e) { if (!session.cancelled) post({ type: 'error', error: String(e?.message || e) }); }
+  if (session === current) current = null;
+  post({ type: 'done', reply: full.split('<|im_end|>')[0].split('<|im_start|>')[0].trim() || '…' });
+}
+self.onmessage = async (e) => {
+  const d = e.data;
+  try {
+    if (d.type === 'init') await init(d);
+    else if (d.type === 'load') { await ensureLLM(d.opts); post({ type: 'loaded', device: usedDevice, dtype: usedDtype }); }
+    else if (d.type === 'generate') await generate(d);
+    else if (d.type === 'cancel') { if (current) { current.cancelled = true; current.stop?.(); } }
+  } catch (err) { post({ type: 'error', error: String(err?.message || err) }); }
+};
+</script>
+
+<script type="text/worker" id="src-tts-worker">
+let tf = null, KokoroTTS = null, TextSplitterStream = null, tts = null, ttsId = '', session = null;
+const post = (m, transfer) => self.postMessage(m, transfer || []);
+async function init(d) {
+  tf = await import(d.urls.transformers);
+  let src = await (await fetch(d.urls.kokoro)).text();
+  const rep = (spec, u) => { for (const q of ['"', "'"]) src = src.split(`from${q}${spec}${q}`).join(`from${JSON.stringify(u)}`); };
+  rep('@huggingface/transformers', d.urls.transformers);
+  rep('phonemizer', d.urls.phonemizer);
+  rep('path', d.urls.stub); rep('fs/promises', d.urls.stub);
+  const k = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  KokoroTTS = k.KokoroTTS; TextSplitterStream = k.TextSplitterStream;
+  const env = tf.env;
+  env.allowLocalModels = !!d.offline; env.allowRemoteModels = !d.offline;
+  if (d.offline && d.urls.localModelPath) env.localModelPath = d.urls.localModelPath;
+  env.backends.onnx.wasm.wasmPaths = d.urls.wasm;
+  post({ type: 'ready' });
+}
+async function ensureTTS(id) {
+  if (tts && ttsId === id) return;
+  ttsId = id;
+  tts = await KokoroTTS.from_pretrained(id, { dtype: 'q8', device: 'wasm', progress_callback: (info) => post({ type: 'progress', phase: 'tts', info }) });
+}
+function cancel() { if (session) { session.cancelled = true; try { session.splitter.close(); } catch {} session = null; } }
+function begin(d) {
+  cancel();
+  const s = { cancelled: false, splitter: new TextSplitterStream() }; session = s;
+  (async () => {
+    try {
+      await ensureTTS(d.ttsId);
+      const stream = tts.stream(s.splitter, { voice: d.voice, speed: d.speed });
+      for await (const { text, phonemes, audio } of stream) {
+        if (s.cancelled) break;
+        const buf = audio.audio;
+        post({ type: 'audio', text, phonemes, sr: audio.sampling_rate, audio: buf }, [buf.buffer]);
+      }
+    } catch (e) { if (!s.cancelled) post({ type: 'error', error: String(e?.message || e) }); }
+    finally { if (session === s) session = null; post({ type: 'tts-done' }); }
+  })();
+}
+self.onmessage = async (e) => {
+  const d = e.data;
+  try {
+    if (d.type === 'init') await init(d);
+    else if (d.type === 'load') { await ensureTTS(d.ttsId); post({ type: 'loaded-tts' }); }
+    else if (d.type === 'begin') begin(d);
+    else if (d.type === 'push') { if (session && !session.cancelled) try { session.splitter.push(d.piece); } catch {} }
+    else if (d.type === 'close') { if (session) try { session.splitter.close(); } catch {} }
+    else if (d.type === 'cancel') cancel();
+  } catch (err) { post({ type: 'error', error: String(err?.message || err) }); }
+};
+</script>
+
+<script type="text/worker" id="src-stub">
+const join = (...a) => a.filter(Boolean).join('/').replace(/\/+/g, '/');
+const resolve = (...a) => join(...a);
+const dirname = (p = '') => p.replace(/\/[^/]*$/, '') || '.';
+const basename = (p = '') => p.split('/').pop();
+const notInBrowser = async () => { throw new Error('filesystem access is not available in the browser'); };
+const path = { join, resolve, dirname, basename, sep: '/' };
+export default path;
+export { join, resolve, dirname, basename };
+export const readFile = notInBrowser;
+export const writeFile = notInBrowser;
+export const access = notInBrowser;
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "@huggingface/transformers": "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { env, pipeline } from '@huggingface/transformers';
+
+document.documentElement.setAttribute('data-theme', localStorage.getItem('anchor.theme') || 'dark');
+
+/* ---- assets: everything from online CDN / HuggingFace ---- */
+const A = {
+  three: 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js',
+  addons: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
+  basis: 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
+  face: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r180/examples/models/gltf/facecap.glb',
+  transformers: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js',
+  wasm: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
+  kokoro: 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
+  phonemizer: 'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
+  modelBase: null,
+};
+const CFG = { mode: 'online', assets: A };
+
+/* ---- worker + node-stub URLs built from the embedded source blocks ---- */
+const workerURL = (id) => URL.createObjectURL(new Blob([document.getElementById(id).textContent], { type: 'text/javascript' }));
+const LLM_WORKER_URL = workerURL('src-llm-worker');
+const TTS_WORKER_URL = workerURL('src-tts-worker');
+const STUB_URL = 'data:text/javascript;base64,' + btoa(document.getElementById('src-stub').textContent);
+
+/* ===================== emotion ===================== */
+const LEX = {
+  joy:      ['happy','glad','great','awesome','love','wonderful','excellent','fun','delighted','yay','congratulations','nice','fantastic','amazing','enjoy','pleased','cheer','smile','haha','lol','excited','brilliant','perfect','thrilled'],
+  sad:      ['sad','sorry','unfortunately','regret','afraid','miss','lonely','disappointed','unhappy','cry','grief','hurts','sigh','alas','tragic','heartbroken','depress'],
+  anger:    ['angry','annoyed','furious','hate','terrible','awful','stupid','unacceptable','ridiculous','outrage','frustrated','no!','wrong','enough'],
+  surprise: ['wow','whoa','really','surprising','unbelievable','incredible','suddenly','shocked','amazing','what?!','no way','astonish'],
+  curious:  ['curious','wonder','interesting','perhaps','maybe','consider','imagine','hmm','question','explore','what if','how about','let us','let me think','intriguing'],
+};
+function detectMood(text) {
+  const t = ' ' + (text || '').toLowerCase() + ' ';
+  const scores = { joy: 0, sad: 0, anger: 0, surprise: 0, curious: 0, neutral: 0.4 };
+  for (const mood in LEX) for (const w of LEX[mood]) if (t.includes(w)) scores[mood] += 1;
+  const bangs = (text.match(/!/g) || []).length;
+  const qs = (text.match(/\?/g) || []).length;
+  if (qs) scores.curious += Math.min(qs, 3) * 0.6;
+  if (bangs) { scores.surprise += Math.min(bangs, 3) * 0.4; scores.joy += 0.2; }
+  let best = 'neutral', bestV = scores.neutral;
+  for (const m in scores) if (scores[m] > bestV) { best = m; bestV = scores[m]; }
+  const intensity = Math.max(0, Math.min(1, best === 'neutral' ? 0.25 : 0.45 + bestV * 0.18));
+  return { mood: best, intensity };
+}
+
+/* ===================== persist ===================== */
+const HKEY = 'anchor.history', HCAP = 40;
+function loadHistory() { try { const h = JSON.parse(localStorage.getItem(HKEY)); return Array.isArray(h) ? h : []; } catch { return []; } }
+function saveHistory(h) { try { localStorage.setItem(HKEY, JSON.stringify(h.slice(-HCAP))); } catch {} }
+function clearHistory() { try { localStorage.removeItem(HKEY); } catch {} }
+
+/* ===================== face (three.js WebGPU head) ===================== */
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const VISEMES = {
+  sil: { mouthClose: 0.12 },
+  MID: { jawOpen: 0.4, mouthStretchLeft: 0.15, mouthStretchRight: 0.15 },
+  AA:  { jawOpen: 1.0 },
+  EH:  { jawOpen: 0.45, mouthStretchLeft: 0.4, mouthStretchRight: 0.4 },
+  EE:  { jawOpen: 0.18, mouthStretchLeft: 0.7, mouthStretchRight: 0.7, mouthSmileLeft: 0.25, mouthSmileRight: 0.25 },
+  OH:  { jawOpen: 0.55, mouthFunnel: 0.5 },
+  OO:  { jawOpen: 0.18, mouthFunnel: 0.65, mouthPucker: 0.7 },
+  FV:  { jawOpen: 0.12, mouthUpperUpLeft: 0.4, mouthUpperUpRight: 0.4, mouthLowerDownLeft: 0.2, mouthLowerDownRight: 0.2 },
+  MBP: { mouthClose: 0.9 },
+  L:   { jawOpen: 0.4, mouthUpperUpLeft: 0.15, mouthUpperUpRight: 0.15 },
+  S:   { jawOpen: 0.12, mouthStretchLeft: 0.35, mouthStretchRight: 0.35 },
+  R:   { jawOpen: 0.3, mouthFunnel: 0.35, mouthPucker: 0.2 },
+};
+const MOODS = {
+  neutral:  { mouthSmileLeft: 0.08, mouthSmileRight: 0.08 },
+  joy:      { mouthSmileLeft: 0.5, mouthSmileRight: 0.5, cheekSquintLeft: 0.35, cheekSquintRight: 0.35, eyeSquintLeft: 0.12, eyeSquintRight: 0.12, browInnerUp: 0.1 },
+  sad:      { browInnerUp: 0.5, mouthFrownLeft: 0.4, mouthFrownRight: 0.4, mouthShrugLower: 0.2, eyeSquintLeft: 0.1, eyeSquintRight: 0.1 },
+  anger:    { browDownLeft: 0.6, browDownRight: 0.6, noseSneerLeft: 0.3, noseSneerRight: 0.3, mouthPressLeft: 0.4, mouthPressRight: 0.4 },
+  surprise: { browInnerUp: 0.5, browOuterUpLeft: 0.5, browOuterUpRight: 0.5, eyeWideLeft: 0.6, eyeWideRight: 0.6 },
+  curious:  { browOuterUpLeft: 0.5, browInnerUp: 0.2, eyeWideLeft: 0.15, eyeWideRight: 0.15 },
+};
+async function createFace({ canvas, modelUrl, basisPath }) {
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  await renderer.init();
+  const size = () => ({ w: canvas.clientWidth || 1, h: canvas.clientHeight || 1 });
+  let { w, h } = size();
+  renderer.setSize(w, h, false);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 20);
+  const roomEnv = new RoomEnvironment();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(roomEnv, 0.02).texture;
+  const key = new THREE.DirectionalLight(0xfff2dd, 1.1); key.position.set(1.2, 1.4, 2.2); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x9fe9ff, 0.55); rim.position.set(-1.6, 0.6, -1.4); scene.add(rim);
+  const ktx2 = await new KTX2Loader().setTranscoderPath(basisPath).detectSupport(renderer);
+  const gltf = await new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder).loadAsync(modelUrl);
+  const root = gltf.scene.children[0];
+  scene.add(root);
+  const head = root.getObjectByName('mesh_2');
+  const dict = head.morphTargetDictionary || {};
+  const infl = head.morphTargetInfluences || [];
+  const find = (name) => { for (const k in dict) if (k === name || k.endsWith('.' + name)) return dict[k]; return -1; };
+  const NAMES = ['jawOpen', 'mouthClose', 'mouthFunnel', 'mouthPucker', 'mouthSmileLeft', 'mouthSmileRight',
+    'mouthFrownLeft', 'mouthFrownRight', 'mouthStretchLeft', 'mouthStretchRight', 'mouthUpperUpLeft', 'mouthUpperUpRight',
+    'mouthLowerDownLeft', 'mouthLowerDownRight', 'mouthPressLeft', 'mouthPressRight', 'mouthShrugLower',
+    'cheekSquintLeft', 'cheekSquintRight', 'noseSneerLeft', 'noseSneerRight',
+    'eyeBlinkLeft', 'eyeBlinkRight', 'eyeSquintLeft', 'eyeSquintRight', 'eyeWideLeft', 'eyeWideRight',
+    'eyeLookInLeft', 'eyeLookOutLeft', 'eyeLookUpLeft', 'eyeLookDownLeft',
+    'eyeLookInRight', 'eyeLookOutRight', 'eyeLookUpRight', 'eyeLookDownRight',
+    'browInnerUp', 'browDownLeft', 'browDownRight', 'browOuterUpLeft', 'browOuterUpRight'];
+  const idx = {}; for (const n of NAMES) idx[n] = find(n);
+  const box = new THREE.Box3().setFromObject(root);
+  const center = box.getCenter(new THREE.Vector3());
+  const sz = box.getSize(new THREE.Vector3());
+  function reframe() {
+    const fov = THREE.MathUtils.degToRad(camera.fov);
+    const dist = Math.max((sz.y * 1.3) / (2 * Math.tan(fov / 2)), (sz.x * 1.3) / (2 * Math.tan(fov / 2)) / camera.aspect);
+    camera.position.set(center.x, center.y + sz.y * 0.02, center.z + dist);
+    camera.lookAt(center.x, center.y, center.z);
+    camera.updateProjectionMatrix();
+  }
+  reframe();
+  let level = 0, openS = 0;
+  let visCur = {}, visTarget = { ...VISEMES.sil };
+  let moodCur = {}, moodTarget = { ...MOODS.neutral }, moodTilt = 0, moodTiltT = 0;
+  let speaking = false;
+  const gaze = { x: 0, y: 0, tx: 0, ty: 0, sx: 0, sy: 0 };
+  let nextSaccade = performance.now() + 900;
+  let blink = 0, nextBlink = performance.now() + 1500 + Math.random() * 2500;
+  const clock = new THREE.Clock(); clock.getDelta();
+  let running = true;
+  const blendObj = (cur, tgt, k) => { const keys = new Set([...Object.keys(cur), ...Object.keys(tgt)]); for (const key of keys) cur[key] = lerp(cur[key] || 0, tgt[key] || 0, k); };
+  function frame() {
+    if (!running) return;
+    const t = clock.getElapsedTime();
+    const dt = Math.min(clock.getDelta(), 0.05);
+    openS = lerp(openS, level, level > openS ? 0.55 : 0.3);
+    const open = openS;
+    blendObj(visCur, visTarget, 0.35);
+    blendObj(moodCur, moodTarget, 0.06);
+    moodTilt = lerp(moodTilt, moodTiltT, 0.05);
+    const now = performance.now();
+    if (now > nextSaccade) {
+      gaze.sx = (Math.random() * 2 - 1) * 0.18; gaze.sy = (Math.random() * 2 - 1) * 0.12;
+      nextSaccade = now + 500 + Math.random() * 1800;
+      setTimeout(() => { gaze.sx = 0; gaze.sy = 0; }, 90 + Math.random() * 120);
+    }
+    gaze.x = lerp(gaze.x, gaze.tx + gaze.sx, 0.15);
+    gaze.y = lerp(gaze.y, gaze.ty + gaze.sy, 0.15);
+    if (now > nextBlink) { blink = 1; nextBlink = now + 220; }
+    if (blink > 0 && now > nextBlink - 120) blink = Math.max(0, blink - dt * 9);
+    if (blink === 0 && now > nextBlink && now < nextBlink + 30) nextBlink = now + 1800 + Math.random() * 3200;
+    const bl = Math.sin(Math.min(blink, 1) * Math.PI);
+    const W = {};
+    const add = (n, v) => { if (v) W[n] = (W[n] || 0) + v; };
+    for (const n in moodCur) add(n, moodCur[n]);
+    for (const n in visCur) {
+      const v = visCur[n];
+      if (n === 'jawOpen') add(n, v * open);
+      else if (n === 'mouthClose') add(n, v * (0.5 + 0.5 * (1 - open)));
+      else add(n, v * (0.4 + 0.6 * open));
+    }
+    add('browInnerUp', 0.04 + Math.sin(t * 0.7) * 0.02);
+    add('eyeBlinkLeft', bl); add('eyeBlinkRight', bl);
+    const gx = Math.max(-0.6, Math.min(0.6, gaze.x)), gy = Math.max(-0.5, Math.min(0.5, gaze.y));
+    if (gx > 0) { add('eyeLookOutRight', gx); add('eyeLookInLeft', gx); }
+    else { add('eyeLookOutLeft', -gx); add('eyeLookInRight', -gx); }
+    if (gy > 0) { add('eyeLookUpLeft', gy); add('eyeLookUpRight', gy); }
+    else { add('eyeLookDownLeft', -gy); add('eyeLookDownRight', -gy); }
+    for (const n of NAMES) { const i = idx[n]; if (i >= 0) infl[i] = clamp01(W[n] || 0); }
+    const swayY = Math.sin(t * 0.45) * (speaking ? 0.025 : 0.05) + gx * 0.06;
+    root.rotation.y = swayY + (speaking ? Math.sin(t * 2.1) * 0.01 : 0);
+    root.rotation.x = Math.sin(t * 0.6) * 0.02 - gy * 0.05 + (speaking ? open * 0.03 : 0);
+    root.rotation.z = moodTilt;
+    root.position.y = Math.sin(t * 1.1) * 0.004;
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  function resize() { const s = size(); if (s.w === w && s.h === h) return; w = s.w; h = s.h; camera.aspect = w / h; renderer.setSize(w, h, false); reframe(); }
+  return {
+    setMouth(v) { level = clamp01(v); },
+    setViseme(id) { visTarget = VISEMES[id] || VISEMES.sil; },
+    setMood(mood, intensity = 0.6) { const base = MOODS[mood] || MOODS.neutral; const scaled = {}; for (const n in base) scaled[n] = base[n] * (0.4 + intensity * 0.8); moodTarget = scaled; moodTiltT = mood === 'curious' ? 0.08 : mood === 'sad' ? -0.03 : 0; },
+    setGazeTarget(x, y) { gaze.tx = Math.max(-1, Math.min(1, x)); gaze.ty = Math.max(-1, Math.min(1, y)); },
+    setSpeaking(on) { speaking = !!on; if (!on) level = 0; },
+    resize, dispose() { running = false; renderer.dispose(); },
+  };
+}
+
+/* ===================== speech (audio player + face driver) ===================== */
+const VMAP = {};
+const put = (chars, v) => chars.split('').forEach((c) => (VMAP[c] = v));
+put('aɑɒʌæɐ', 'AA'); put('eɛ', 'EH'); put('iɪɨyjɪ', 'EE'); put('oɔ', 'OH');
+put('uʊwʉ', 'OO'); put('fv', 'FV'); put('mbp', 'MBP'); put('l', 'L');
+put('szʃʒʧʤ', 'S'); put('rɹɾ', 'R');
+function phonemesToVisemes(ph) {
+  const seq = [];
+  for (const ch of (ph || '')) {
+    if (' ˈˌːˑ.,!?;:()"\''.includes(ch)) { if (seq[seq.length - 1] !== 'sil') seq.push('sil'); continue; }
+    const v = VMAP[ch] || 'MID';
+    if (seq[seq.length - 1] !== v) seq.push(v);
+  }
+  return seq.length ? seq : ['MID'];
+}
+function createSpeech({ face, onCaption, onState }) {
+  const AC = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = AC.createAnalyser();
+  analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.6;
+  const master = AC.createGain();
+  analyser.connect(master); master.connect(AC.destination);
+  const timeBuf = new Float32Array(analyser.fftSize);
+  let session = null;
+  master.gain.value = 1;
+  const begin = () => { cancel(); session = { clips: [], srcs: [], nextTime: 0, lastEnd: 0, started: false, ended: false, lastCaption: -1, lastCaptionText: '' }; AC.resume().catch(() => {}); };
+  function enqueue(chunk) {
+    if (!session) begin();
+    const s = session;
+    const buf = AC.createBuffer(1, chunk.audio.length, chunk.sr);
+    buf.getChannelData(0).set(chunk.audio);
+    const src = AC.createBufferSource(); src.buffer = buf; src.connect(analyser);
+    const start = Math.max(AC.currentTime + 0.08, s.nextTime);
+    src.start(start);
+    s.nextTime = start + buf.duration; s.lastEnd = s.nextTime; s.srcs.push(src);
+    const text = (chunk.text || '').trim();
+    s.clips.push({ start, end: start + buf.duration, dur: buf.duration, text, words: text.split(/\s+/), vis: phonemesToVisemes(chunk.phonemes) });
+    if (!s.started) { s.started = true; onState?.('speaking'); face?.setSpeaking(true); }
+  }
+  const end = () => { if (session) session.ended = true; };
+  function cancel() {
+    if (!session) return;
+    for (const src of session.srcs) { try { src.stop(); } catch {} }
+    session = null;
+    face?.setSpeaking(false); face?.setMouth(0); face?.setViseme('sil');
+    onCaption?.(null, -1); onState?.('idle');
+  }
+  function tick() {
+    requestAnimationFrame(tick);
+    analyser.getFloatTimeDomainData(timeBuf);
+    let sum = 0; for (let i = 0; i < timeBuf.length; i++) sum += timeBuf[i] * timeBuf[i];
+    face?.setMouth(Math.min(1, Math.max(0, (Math.sqrt(sum / timeBuf.length) - 0.006) * 9)));
+    const s = session; if (!s) return;
+    const t = AC.currentTime;
+    const clip = s.clips.find((c) => t >= c.start && t < c.end);
+    if (clip) {
+      const p = (t - clip.start) / clip.dur;
+      face?.setViseme(clip.vis[Math.min(clip.vis.length - 1, Math.floor(p * clip.vis.length))]);
+      const wi = Math.min(clip.words.length - 1, Math.floor(p * clip.words.length));
+      if (clip.text !== s.lastCaptionText || wi !== s.lastCaption) { s.lastCaptionText = clip.text; s.lastCaption = wi; onCaption?.(clip.text, wi); }
+    } else { face?.setViseme('sil'); }
+    if (s.ended && t > s.lastEnd + 0.05) {
+      session = null;
+      face?.setSpeaking(false); face?.setMouth(0); face?.setViseme('sil');
+      onCaption?.(null, -1); onState?.('idle');
+    }
+  }
+  tick();
+  return { begin, enqueue, end, cancel, setMuted(m) { master.gain.value = m ? 0 : 1; }, setFace(f) { face = f; }, analyser, get speaking() { return !!session; } };
+}
+
+/* ===================== inference (two parallel workers) ===================== */
+const LLM_MODELS = {
+  '135m': { id: 'HuggingFaceTB/SmolLM2-135M-Instruct', label: 'SmolLM2 · 135M (fast)' },
+  '360m': { id: 'HuggingFaceTB/SmolLM2-360M-Instruct', label: 'SmolLM2 · 360M (smarter)' },
+};
+function createInference({ assets, offline, onProgress, onLoaded, onToken, onAudio, onSpeechEnd, onDone, onError }) {
+  const abs = (u) => (u ? new URL(u, document.baseURI).href : null);
+  const urls = { transformers: abs(assets.transformers), kokoro: abs(assets.kokoro), phonemizer: abs(assets.phonemizer), stub: STUB_URL, wasm: assets.wasm, localModelPath: abs(assets.modelBase) };
+  const llm = new Worker(LLM_WORKER_URL, { type: 'module' });
+  const tts = new Worker(TTS_WORKER_URL, { type: 'module' });
+  let r1, r2; const ready = Promise.all([new Promise((r) => (r1 = r)), new Promise((r) => (r2 = r))]);
+  llm.onmessage = (e) => {
+    const d = e.data;
+    switch (d.type) {
+      case 'ready': r1(); break;
+      case 'progress': onProgress?.('llm', d.info); break;
+      case 'loaded': onLoaded?.(d.device, d.dtype); break;
+      case 'piece': onToken?.(d.clean); tts.postMessage({ type: 'push', piece: d.piece }); break;
+      case 'done': tts.postMessage({ type: 'close' }); onDone?.(d.reply); break;
+      case 'error': onError?.(d.error); break;
+    }
+  };
+  tts.onmessage = (e) => {
+    const d = e.data;
+    switch (d.type) {
+      case 'ready': r2(); break;
+      case 'progress': onProgress?.('tts', d.info); break;
+      case 'audio': onAudio?.(d); break;
+      case 'tts-done': onSpeechEnd?.(); break;
+      case 'error': onError?.(d.error); break;
+    }
+  };
+  llm.onerror = tts.onerror = (e) => onError?.(e.message || 'worker error');
+  llm.postMessage({ type: 'init', offline, urls });
+  tts.postMessage({ type: 'init', offline, urls });
+  return {
+    ready,
+    load: (p) => { llm.postMessage({ type: 'load', opts: p.opts }); tts.postMessage({ type: 'load', ttsId: p.ttsId }); },
+    generate: (p) => { tts.postMessage({ type: 'begin', ttsId: p.ttsId, voice: p.voice, speed: p.speed }); llm.postMessage({ type: 'generate', messages: p.messages, opts: p.opts }); },
+    cancel: () => { llm.postMessage({ type: 'cancel' }); tts.postMessage({ type: 'cancel' }); },
+  };
+}
+
+/* ===================== STT (Whisper push-to-talk) ===================== */
+const STT_MODEL = 'onnx-community/whisper-tiny.en';
+function createSTT({ onProgress }) {
+  let asr = null, loading = null, stream = null, recorder = null, chunks = [];
+  async function ensure() {
+    if (asr) return asr;
+    if (loading) return loading;
+    loading = pipeline('automatic-speech-recognition', STT_MODEL, { dtype: 'q8', progress_callback: onProgress }).then((p) => { asr = p; return p; }).finally(() => { loading = null; });
+    return loading;
+  }
+  async function startRecording() {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.start();
+  }
+  async function stopAndTranscribe() {
+    if (!recorder) return '';
+    const blob = await new Promise((res) => { recorder.onstop = () => res(new Blob(chunks, { type: recorder.mimeType })); recorder.stop(); });
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null; recorder = null;
+    const arr = await blob.arrayBuffer();
+    const tmp = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await tmp.decodeAudioData(arr);
+    tmp.close();
+    const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+    const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+    const rendered = await off.startRendering();
+    const model = await ensure();
+    const out = await model(rendered.getChannelData(0));
+    return (out?.text || '').trim();
+  }
+  return { ensure, startRecording, stopAndTranscribe, get loaded() { return !!asr; } };
+}
+
+/* ===================== app ===================== */
+const TTS_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
+const VOICES = [
+  { id: 'af_heart', label: 'Heart · US ♀' }, { id: 'af_bella', label: 'Bella · US ♀' },
+  { id: 'af_nicole', label: 'Nicole · US ♀' }, { id: 'am_michael', label: 'Michael · US ♂' },
+  { id: 'am_fenrir', label: 'Fenrir · US ♂' }, { id: 'am_puck', label: 'Puck · US ♂' },
+  { id: 'bf_emma', label: 'Emma · UK ♀' }, { id: 'bm_george', label: 'George · UK ♂' },
+];
+const SYSTEM = {
+  role: 'system',
+  content: 'You are Anchor, a friendly AI assistant shown as an on-screen presenter. You are an AI: you have no job, boss, or personal life, so never invent personal stories or events. Answer the user\'s message directly and stay on topic. Reply in one or two short, plain spoken sentences (no markdown, lists, headings or emoji) so it sounds natural read aloud.',
+};
+const FEWSHOT = [
+  { role: 'user', content: 'Hi, how are you?' },
+  { role: 'assistant', content: "Hi! I'm doing well, thanks for asking. What can I help you with today?" },
+  { role: 'user', content: 'What is the capital of France?' },
+  { role: 'assistant', content: 'The capital of France is Paris.' },
+  { role: 'user', content: 'Tell me a fun fact.' },
+  { role: 'assistant', content: 'Honey never spoils — archaeologists have found pots of it in ancient tombs that are still edible.' },
+];
+const settings = {
+  voice: localStorage.getItem('anchor.voice') || 'af_heart',
+  speed: +(localStorage.getItem('anchor.speed') || 1),
+  model: localStorage.getItem('anchor.model') || '135m',
+  dtype: localStorage.getItem('anchor.dtype') || 'q8',
+  device: (localStorage.getItem('anchor.device') === 'webgpu') ? 'webgpu' : 'wasm',
+  muted: localStorage.getItem('anchor.muted') === '1',
+};
+
+// main-thread transformers env (used only by Whisper STT) — workers configure their own
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
+env.backends.onnx.wasm.wasmPaths = A.wasm;
+
+const $ = (id) => document.getElementById(id);
+const el = {
+  led: $('led'), status: $('status'), banner: $('banner'), llmId: $('llmId'), ttsId: $('ttsId'), devTag: $('devTag'),
+  chat: $('chat'), input: $('input'), send: $('send'), stopBtn: $('stopBtn'), micBtn: $('micBtn'), reset: $('reset'), preload: $('preload'),
+  themeBtn: $('themeBtn'), settingsBtn: $('settingsBtn'), muteBtn: $('muteBtn'),
+  voice: $('voice'), voiceSel: $('voiceSel'), onair: $('onair'), onairTxt: $('onairTxt'), caption: $('caption'),
+  faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
+  overlay: $('overlay'), ring: $('ring'), ovTitle: $('ovTitle'), ovLine: $('ovLine'), ovPct: $('ovPct'), ovFile: $('ovFile'), ovBytes: $('ovBytes'), ovHint: $('ovHint'),
+  settingsPanel: $('settingsPanel'), speed: $('speed'), speedVal: $('speedVal'), modelSel: $('modelSel'), dtypeSel: $('dtypeSel'), deviceSel: $('deviceSel'), clearBtn: $('clearBtn'),
+};
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+el.ttsId.textContent = 'Kokoro-82M';
+for (const v of VOICES) for (const sel of [el.voice, el.voiceSel]) { const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; sel.appendChild(o); }
+for (const k in LLM_MODELS) { const o = document.createElement('option'); o.value = k; o.textContent = LLM_MODELS[k].label; el.modelSel.appendChild(o); }
+el.voice.value = el.voiceSel.value = settings.voice; el.speed.value = settings.speed; el.speedVal.textContent = settings.speed.toFixed(2) + '×';
+el.modelSel.value = settings.model; el.dtypeSel.value = settings.dtype; el.deviceSel.value = settings.device;
+el.llmId.textContent = LLM_MODELS[settings.model].id.split('/').pop();
+
+let busy = false, face = null, recording = false;
+let pending = null;
+let history = loadHistory();
+
+const fmtBytes = (n) => { if (!Number.isFinite(n) || n <= 0) return '0 B'; const u = ['B', 'KB', 'MB', 'GB']; let i = 0, v = n; while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; } return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`; };
+const fileMap = new Map();
+const overallPct = () => { let l = 0, t = 0; for (const v of fileMap.values()) if (v.total > 0) { l += v.loaded || 0; t += v.total; } return t > 0 ? (l / t) * 100 : 0; };
+const showOverlay = (on) => { el.overlay.classList.toggle('show', !!on); el.overlay.setAttribute('aria-hidden', on ? 'false' : 'true'); };
+function setProgress(pct, line, file, loaded, total) {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  el.ring.style.setProperty('--p', `${p}%`); $('barFill').style.setProperty('--w', `${p}%`); el.ovPct.textContent = `${p}%`;
+  if (line) el.ovLine.textContent = line; if (file) el.ovFile.textContent = file;
+  el.ovBytes.textContent = (Number.isFinite(loaded) && total > 0) ? `${fmtBytes(loaded)} / ${fmtBytes(total)}` : '—';
+}
+function progress(title, info) {
+  const st = info?.status, file = info?.file || '';
+  if (st === 'initiate' || st === 'download') { el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `fetching ${file}`, file); }
+  else if (st === 'progress') { if (file) fileMap.set(file, { loaded: info.loaded, total: info.total }); el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `downloading ${file}`, file, info.loaded, info.total); }
+  else if (st === 'done') { if (file && fileMap.has(file)) { const v = fileMap.get(file); fileMap.set(file, { loaded: v.total ?? v.loaded, total: v.total ?? v.loaded }); } setProgress(overallPct(), `unpacking ${file}`, file); }
+  else if (st === 'ready') { setProgress(100, 'ready', info.model || ''); setTimeout(() => showOverlay(false), 220); }
+}
+const makeProgress = (title) => (info) => progress(title, info);
+
+const setLED = (m) => { el.led.className = 'led' + (m ? ' ' + m : ''); };
+const setStatus = (t) => { el.status.textContent = t; };
+const scrollBottom = () => { el.chat.scrollTop = el.chat.scrollHeight; };
+function setOnAir(mode) {
+  el.onair.classList.remove('live', 'think');
+  if (mode === 'live') { el.onair.classList.add('live'); el.onairTxt.textContent = 'ON AIR'; }
+  else if (mode === 'think') { el.onair.classList.add('think'); el.onairTxt.textContent = 'THINKING'; }
+  else el.onairTxt.textContent = 'STANDBY';
+}
+function addMsg(role, content) {
+  const row = document.createElement('div'); row.className = `msg ${role}`;
+  const who = document.createElement('div'); who.className = 'msg__role'; who.textContent = role === 'assistant' ? 'AI' : role === 'user' ? 'YOU' : 'SYS';
+  const bubble = document.createElement('div'); bubble.className = 'bubble';
+  if (content instanceof Node) bubble.appendChild(content); else bubble.textContent = content;
+  row.append(who, bubble); el.chat.appendChild(row); scrollBottom(); return bubble;
+}
+const typingNode = () => { const s = document.createElement('span'); s.className = 'typing'; s.innerHTML = '<span></span><span></span><span></span>'; return s; };
+function renderError(bubble, lastText, e) {
+  bubble.innerHTML = ''; bubble.append('Error: ' + (e ?? 'unknown') + ' ');
+  const r = document.createElement('button'); r.className = 'btn btn--ghost btn--tiny'; r.textContent = 'retry';
+  r.onclick = () => { bubble.closest('.msg').remove(); sendMessage(lastText); };
+  bubble.append(r);
+}
+function restoreChat() {
+  el.chat.innerHTML = '';
+  if (!history.length) addMsg('system', 'Single-file in-browser presenter (WEB). Type or hit 🎙 — first run downloads & caches the models.');
+  else for (const m of history) addMsg(m.role, m.content);
+}
+const getMessages = () => [SYSTEM, ...FEWSHOT, ...history.slice(-12)];
+function updateDevTag(device, dtype) { el.devTag.hidden = false; el.devTag.textContent = dtype ? `${device} ${dtype}` : device; }
+
+const speech = createSpeech({ face: null, onCaption, onState });
+speech.setMuted(settings.muted);
+const stt = createSTT({ onProgress: makeProgress('speech recognizer') });
+const PROG_TITLE = { llm: 'language model', tts: 'voice model' };
+const inference = createInference({
+  assets: A, offline: false,
+  onProgress: (phase, info) => progress(PROG_TITLE[phase] || 'model', info),
+  onLoaded: (device, dtype) => updateDevTag(device, dtype),
+  onToken: (clean) => { if (!pending) return; if (pending.first) { pending.bubble.textContent = ''; pending.first = false; } pending.bubble.textContent = clean; scrollBottom(); if (clean.length - pending.moodLen > 28) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); pending.moodLen = clean.length; } },
+  onAudio: (chunk) => speech.enqueue(chunk),
+  onSpeechEnd: () => speech.end(),
+  onDone: (reply) => { if (!pending) return; pending.bubble.textContent = reply; history.push({ role: 'assistant', content: reply }); saveHistory(history); const m = detectMood(reply); face?.setMood(m.mood, m.intensity); setStatus('ready'); setLED('ready'); setBusy(false); pending = null; },
+  onError: (errMsg) => { console.error('infer:', errMsg); if (pending) { renderError(pending.bubble, pending.userText, errMsg); pending = null; } else { setStatus('error'); } speech.cancel(); setOnAir('idle'); setLED('err'); setBusy(false); showOverlay(false); },
+});
+
+function onState(state) {
+  if (state === 'speaking') { setOnAir('live'); el.stopBtn.hidden = false; }
+  else { setOnAir('idle'); el.stopBtn.hidden = true; el.caption.classList.remove('show'); }
+}
+function onCaption(text, wi) {
+  if (!text) { el.caption.classList.remove('show'); el.caption.innerHTML = ''; return; }
+  el.caption.classList.add('show');
+  el.caption.innerHTML = text.split(/\s+/).map((w, i) => `<span class="${i < wi ? 'said' : i === wi ? 'now' : ''}">${esc(w)}</span>`).join(' ');
+}
+
+function setBusy(on) { busy = !!on; el.send.disabled = busy || !el.input.value.trim(); el.reset.disabled = busy; el.preload.disabled = busy; el.micBtn.disabled = busy; }
+
+async function sendMessage(raw) {
+  const text = (raw ?? '').trim();
+  if (!text || busy) return;
+  speech.cancel(); inference.cancel(); setOnAir('idle'); setBusy(true);
+  addMsg('user', text); history.push({ role: 'user', content: text }); saveHistory(history);
+  const bubble = addMsg('assistant', typingNode());
+  setOnAir('think'); setStatus('thinking'); setLED('busy');
+  pending = { bubble, userText: text, first: true, moodLen: 0 };
+  fileMap.clear();
+  await inference.ready;
+  speech.begin();
+  inference.generate({ messages: getMessages(), opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device, maxTokens: 160 }, ttsId: TTS_ID, voice: settings.voice, speed: settings.speed });
+}
+
+const waveCtx = el.wave.getContext('2d');
+const freqBuf = new Uint8Array(speech.analyser.frequencyBinCount);
+function drawWave() {
+  requestAnimationFrame(drawWave);
+  const c = el.wave, dpr = Math.min(window.devicePixelRatio, 2), w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr || c.height !== h * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0); waveCtx.clearRect(0, 0, w, h);
+  speech.analyser.getByteFrequencyData(freqBuf);
+  const css = getComputedStyle(document.documentElement);
+  const amber = css.getPropertyValue('--amber').trim() || '#f0a93b', teal = css.getPropertyValue('--teal').trim() || '#46d6c0';
+  const bars = 48, step = Math.floor(freqBuf.length / bars), bw = w / bars;
+  for (let i = 0; i < bars; i++) { const v = freqBuf[i * step] / 255, bh = Math.max(2, v * h); waveCtx.fillStyle = i % 2 ? teal : amber; waveCtx.globalAlpha = 0.3 + v * 0.7; waveCtx.fillRect(i * bw + 1, h - bh, bw - 2, bh); }
+  waveCtx.globalAlpha = 1;
+}
+
+async function micToggle() {
+  if (busy) return;
+  if (!recording) {
+    try { await stt.ensure(); } catch (e) { console.error(e); setStatus('stt error'); return; }
+    try { await stt.startRecording(); recording = true; el.micBtn.classList.add('rec'); setStatus('listening'); setLED('busy'); }
+    catch (e) { console.error(e); el.banner.hidden = false; el.banner.textContent = 'Microphone access denied or unavailable.'; }
+  } else {
+    recording = false; el.micBtn.classList.remove('rec'); setStatus('transcribing'); setLED('busy');
+    try { const t = await stt.stopAndTranscribe(); setStatus('ready'); setLED('ready'); if (t) sendMessage(t); }
+    catch (e) { console.error(e); setStatus('stt error'); setLED('err'); }
+  }
+}
+
+const openSettings = (on) => { el.settingsPanel.classList.toggle('open', on); el.settingsPanel.setAttribute('aria-hidden', on ? 'false' : 'true'); };
+
+el.input.addEventListener('input', () => { el.send.disabled = busy || !el.input.value.trim(); });
+el.input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); } });
+el.send.addEventListener('click', () => { const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); });
+el.stopBtn.addEventListener('click', () => { speech.cancel(); inference.cancel(); setOnAir('idle'); });
+el.micBtn.addEventListener('click', micToggle);
+el.preload.addEventListener('click', async () => { if (busy) return; fileMap.clear(); await inference.ready; inference.load({ opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device }, ttsId: TTS_ID }); });
+el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); inference.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
+
+const setVoice = (v) => { settings.voice = v; localStorage.setItem('anchor.voice', v); el.voice.value = v; el.voiceSel.value = v; };
+el.voice.addEventListener('change', () => setVoice(el.voice.value));
+el.voiceSel.addEventListener('change', () => setVoice(el.voiceSel.value));
+el.speed.addEventListener('input', () => { settings.speed = +el.speed.value; el.speedVal.textContent = settings.speed.toFixed(2) + '×'; localStorage.setItem('anchor.speed', settings.speed); });
+el.modelSel.addEventListener('change', () => { settings.model = el.modelSel.value; localStorage.setItem('anchor.model', settings.model); el.llmId.textContent = LLM_MODELS[settings.model].id.split('/').pop(); });
+el.dtypeSel.addEventListener('change', () => { settings.dtype = el.dtypeSel.value; localStorage.setItem('anchor.dtype', settings.dtype); });
+el.deviceSel.addEventListener('change', () => { settings.device = el.deviceSel.value; localStorage.setItem('anchor.device', settings.device); });
+el.clearBtn.addEventListener('click', () => { history = []; clearHistory(); restoreChat(); });
+
+el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; speech.setMuted(settings.muted); localStorage.setItem('anchor.muted', settings.muted ? '1' : '0'); el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0'; });
+el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0';
+el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('anchor.theme', n); });
+el.settingsBtn.addEventListener('click', () => openSettings(!el.settingsPanel.classList.contains('open')));
+el.settingsPanel.querySelectorAll('[data-close]').forEach((n) => n.addEventListener('click', () => openSettings(false)));
+
+window.addEventListener('resize', () => face?.resize());
+el.faceCanvas.addEventListener('pointermove', (e) => { const r = el.faceCanvas.getBoundingClientRect(); face?.setGazeTarget(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1)); });
+el.faceCanvas.addEventListener('pointerleave', () => face?.setGazeTarget(0, 0));
+
+restoreChat(); setStatus('idle'); setLED(''); setBusy(false); el.input.focus(); drawWave();
+(async () => {
+  try { face = await createFace({ canvas: el.faceCanvas, modelUrl: A.face, basisPath: A.basis }); speech.setFace(face); }
+  catch (e) { console.error('Face init failed:', e); el.faceFallback.hidden = false; el.faceFallback.innerHTML = 'The animated face needs WebGPU (or WebGL2).<br/>Chat &amp; voice still work — try a recent Chrome/Edge.'; }
+})();
+</script>
+</body>
+</html>
