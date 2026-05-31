@@ -32,10 +32,10 @@ $VOICES = @('af_heart','af_bella','af_nicole','am_michael','am_fenrir','am_puck'
 $items = New-Object System.Collections.Generic.List[object]
 function Add-Item($u, $p) { $items.Add(@{ U = $u; P = $p }) }
 
-# three.js core + face model (three.webgpu.js imports ./three.core.js)
-Add-Item "$THREE/build/three.webgpu.js" 'vendor/three/build/three.webgpu.js'
+# three.js (module build imports ./three.core.js) + three-vrm for the VRM avatar
+Add-Item "$THREE/build/three.module.js" 'vendor/three/build/three.module.js'
 Add-Item "$THREE/build/three.core.js" 'vendor/three/build/three.core.js'
-Add-Item "$THREE_GH/examples/models/gltf/facecap.glb" 'vendor/three/facecap.glb'
+Add-Item 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js' 'vendor/three-vrm/three-vrm.module.min.js'
 
 # three.js addons (mirror the jsm tree so their relative imports resolve)
 $addons = @(

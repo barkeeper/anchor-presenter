@@ -164,11 +164,12 @@
   let mode = localStorage.getItem('anchor.mode') || 'online';
 
   const CDN = {
-    three:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js',
+    three:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js',
     threeCore:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js',
     addons:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
     basis:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
-    face:'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r180/examples/models/gltf/facecap.glb',
+    vrm:'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js',
+    face:'./assets/avatar.vrm',
     transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js',
     wasm:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
     kokoro:'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
@@ -176,26 +177,18 @@
     modelBase:null,
   };
   const LOCAL = {
-    three:'./vendor/three/build/three.webgpu.js',
+    three:'./vendor/three/build/three.module.js',
     threeCore:'./vendor/three/build/three.core.js',
     addons:'./vendor/three/jsm/',
     basis:'./vendor/three/jsm/libs/basis/',
-    face:'./vendor/three/facecap.glb',
+    vrm:'./vendor/three-vrm/three-vrm.module.min.js',
+    face:'./assets/avatar.vrm',
     transformers:'./vendor/transformers/transformers.min.js',
     wasm:new URL('./vendor/transformers/', document.baseURI).href,
     kokoro:'./vendor/kokoro/kokoro.js',
     phonemizer:'./vendor/phonemizer/phonemizer.js',
     modelBase:'./models/',
   };
-  // Subresource integrity for the pinned CDN libraries (WEB mode only).
-  const SRI = {
-    [CDN.three]:'sha384-SkTLw/lN3jv1UIxteuivToEdXgaEiflmc3P+f8n+GoIqsbu3KE8adYoNlmTYWg0u',
-    [CDN.threeCore]:'sha384-r1q8Si7xFBrvMv3Q4yjQkKhkYZ2lp+wn/bPPzNZTsc8DY4uPJmm2vheuz1Yn+8m8',
-    [CDN.transformers]:'sha384-G1EJHfr5gbjkceaa8ZspGjLIAgIIb0/8KUzIEo6hAgAtJ4R2EKhcfp35K2Yziqq/',
-    [CDN.kokoro]:'sha384-LKzWuVipppuVOK+ZMC5g3O4yAZNH9JzAc0lApim5v00ZcgRjgUJY4o3hHLhTivfN',
-    [CDN.phonemizer]:'sha384-w+2+zdHrz1bNypuNWcuFSZ+lMZIDvqjQsAHIHSu/L7QRv91/YI4G2Q7kypzaCtEx',
-  };
-
   let missing = false;
   if (mode === 'offline') {
     try { const r = await fetch(LOCAL.transformers, { method: 'HEAD', cache: 'no-store' }); if (!r.ok) missing = true; }
@@ -210,15 +203,12 @@
   im.type = 'importmap';
   const map = {
     imports: {
-      'three': A.three, 'three/webgpu': A.three, 'three/addons/': A.addons,
+      'three': A.three, 'three/addons/': A.addons, '@pixiv/three-vrm': A.vrm,
       '@huggingface/transformers': A.transformers,
       'kokoro-js': A.kokoro, 'phonemizer': A.phonemizer,
       'path': './vendor/stub-empty.js', 'fs/promises': './vendor/stub-empty.js',
     },
   };
-  if (mode === 'online') {
-    map.integrity = { [CDN.three]: SRI[CDN.three], [CDN.threeCore]: SRI[CDN.threeCore], [CDN.transformers]: SRI[CDN.transformers], [CDN.kokoro]: SRI[CDN.kokoro], [CDN.phonemizer]: SRI[CDN.phonemizer] };
-  }
   im.textContent = JSON.stringify(map);
   selfScript.after(im);
 

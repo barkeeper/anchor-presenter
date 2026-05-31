@@ -231,9 +231,9 @@ function llmFileList() {
   return ['config.json', 'generation_config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt', `onnx/${DTYPE_FILE[settings.dtype] || DTYPE_FILE.q8}`].map((f) => base + f);
 }
 function buildPrecacheList() {
-  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './llm-worker.js', './tts-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js'];
+  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './llm-worker.js', './tts-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js', './assets/avatar.vrm'];
   const core = CFG.mode === 'online' ? 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js' : './vendor/three/build/three.core.js';
-  const libs = [A.three, core, A.transformers, A.kokoro, A.phonemizer, A.face,
+  const libs = [A.three, core, A.vrm, A.transformers, A.kokoro, A.phonemizer, A.face,
     A.addons + 'environments/RoomEnvironment.js', A.addons + 'loaders/GLTFLoader.js', A.addons + 'loaders/KTX2Loader.js',
     A.addons + 'libs/ktx-parse.module.js', A.addons + 'libs/zstddec.module.js', A.addons + 'libs/meshopt_decoder.module.js',
     A.addons + 'math/ColorSpaces.js', A.addons + 'utils/BufferGeometryUtils.js', A.addons + 'utils/WorkerPool.js',
