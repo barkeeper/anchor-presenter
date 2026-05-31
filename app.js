@@ -58,7 +58,7 @@ const el = {
   led: $('led'), status: $('status'), banner: $('banner'), llmId: $('llmId'), ttsId: $('ttsId'), devTag: $('devTag'),
   chat: $('chat'), input: $('input'), send: $('send'), stopBtn: $('stopBtn'), micBtn: $('micBtn'), reset: $('reset'), preload: $('preload'),
   modeSwitch: $('modeSwitch'), themeBtn: $('themeBtn'), settingsBtn: $('settingsBtn'), installBtn: $('installBtn'), muteBtn: $('muteBtn'),
-  voice: $('voice'), onair: $('onair'), onairTxt: $('onairTxt'), caption: $('caption'),
+  voice: $('voice'), voiceSel: $('voiceSel'), onair: $('onair'), onairTxt: $('onairTxt'), caption: $('caption'),
   faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
   overlay: $('overlay'), ring: $('ring'), ovTitle: $('ovTitle'), ovLine: $('ovLine'), ovPct: $('ovPct'), ovFile: $('ovFile'), ovBytes: $('ovBytes'), ovHint: $('ovHint'),
   settingsPanel: $('settingsPanel'), speed: $('speed'), speedVal: $('speedVal'), modelSel: $('modelSel'), dtypeSel: $('dtypeSel'), deviceSel: $('deviceSel'),
@@ -68,9 +68,9 @@ const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>'
 
 el.ttsId.textContent = 'Kokoro-82M';
 el.modeSwitch.dataset.mode = CFG.mode;
-for (const v of VOICES) { const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; el.voice.appendChild(o); }
+for (const v of VOICES) for (const sel of [el.voice, el.voiceSel]) { const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; sel.appendChild(o); }
 for (const k in LLM_MODELS) { const o = document.createElement('option'); o.value = k; o.textContent = LLM_MODELS[k].label; el.modelSel.appendChild(o); }
-el.voice.value = settings.voice; el.speed.value = settings.speed; el.speedVal.textContent = settings.speed.toFixed(2) + '×';
+el.voice.value = el.voiceSel.value = settings.voice; el.speed.value = settings.speed; el.speedVal.textContent = settings.speed.toFixed(2) + '×';
 el.modelSel.value = settings.model; el.dtypeSel.value = settings.dtype; el.deviceSel.value = settings.device;
 el.llmId.textContent = LLM_MODELS[settings.model].id.split('/').pop();
 
@@ -278,7 +278,9 @@ el.micBtn.addEventListener('click', micToggle);
 el.preload.addEventListener('click', async () => { if (busy) return; fileMap.clear(); await inference.ready; inference.load({ opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device }, ttsId: TTS_ID }); });
 el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); inference.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
 
-el.voice.addEventListener('change', () => { settings.voice = el.voice.value; localStorage.setItem('anchor.voice', settings.voice); });
+const setVoice = (v) => { settings.voice = v; localStorage.setItem('anchor.voice', v); el.voice.value = v; el.voiceSel.value = v; };
+el.voice.addEventListener('change', () => setVoice(el.voice.value));
+el.voiceSel.addEventListener('change', () => setVoice(el.voiceSel.value));
 el.speed.addEventListener('input', () => { settings.speed = +el.speed.value; el.speedVal.textContent = settings.speed.toFixed(2) + '×'; localStorage.setItem('anchor.speed', settings.speed); });
 el.modelSel.addEventListener('change', () => { settings.model = el.modelSel.value; localStorage.setItem('anchor.model', settings.model); el.llmId.textContent = LLM_MODELS[settings.model].id.split('/').pop(); });
 el.dtypeSel.addEventListener('change', () => { settings.dtype = el.dtypeSel.value; localStorage.setItem('anchor.dtype', settings.dtype); });
