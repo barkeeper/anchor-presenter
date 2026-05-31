@@ -1,51 +1,75 @@
 # ANCHOR — a local AI presenter
 
-Three projects fused into one single-page app that runs **100% in the browser**:
+Three projects fused into one single-page app that runs **100% in the browser**, on-device:
 
-1. **Chat** — an LLM (`SmolLM2-135M-Instruct`) via [Transformers.js](https://github.com/huggingface/transformers.js).
-2. **Voice** — the reply is spoken with [Kokoro TTS](https://github.com/hexgrad/kokoro) (the engine behind [tts.rocks](https://github.com/steveseguin/tts.rocks)).
-3. **Face** — a [three.js WebGPU Face Cap](https://threejs.org/examples/?q=webgpu#webgpu_morphtargets_face) head whose jaw and lips follow the spoken audio in real time.
+1. **Chat** — an LLM (`SmolLM2`) via [Transformers.js](https://github.com/huggingface/transformers.js).
+2. **Voice** — replies are spoken with [Kokoro TTS](https://github.com/hexgrad/kokoro) (the engine behind [tts.rocks](https://github.com/steveseguin/tts.rocks)).
+3. **Face** — a [three.js WebGPU Face Cap](https://threejs.org/examples/?q=webgpu#webgpu_morphtargets_face) head that lip-syncs and emotes.
+
+## Features
+
+| | |
+|---|---|
+| **Streaming** | LLM tokens stream straight into Kokoro, so the face starts talking ~1 sentence in. |
+| **Viseme lip-sync** | Phonemes → mouth shapes (ah/ee/oo/closed…) blended with live audio amplitude. |
+| **Emotion** | A zero-cost heuristic reads each reply and sets the face's mood (joy/curious/sad/…). |
+| **Gaze & life** | Eyes track the cursor, saccade, blink; the head turns toward you while speaking. |
+| **Voice input** | Hold/click 🎙 to talk — Whisper (`whisper-tiny.en`) transcribes locally. |
+| **Captions** | Karaoke-style captions sync to the spoken words. |
+| **Memory** | The conversation persists across reloads. |
+| **Settings** | Voice, speaking rate, model (135M/360M), precision, and compute device. |
+| **WebGPU** | LLM auto-uses WebGPU when available (falls back to wasm). |
+| **PWA / offline** | Installable; a service worker caches everything so WEB mode keeps working with no internet. |
+| **WEB ⇄ LOCAL** | Switch every asset source between CDN+HF and the local project folder. |
+| **Dark / light** | Instant theme toggle. |
 
 ## Run
 
-Serve the folder over HTTP (ES modules + WebGPU need a real origin, not `file://`):
+Serve over HTTP (ES modules, WebGPU and the service worker need a real origin):
 
 ```powershell
-npx serve .          # or: python -m http.server 5173
+python -m http.server 5173        # or: npx serve .
 ```
 
-Open the page, type a message, press **Enter**. First run downloads the models and caches them in the browser.
+Open the page, type or hit 🎙, press **Enter**. First run downloads the models and caches them.
 
-> The face needs **WebGPU** (Chrome/Edge) — it falls back to WebGL2 where available. Chat + voice work regardless.
+> The face needs **WebGPU** (Chrome/Edge), falling back to WebGL2. Chat + voice work regardless.
 
-## WEB ⇄ LOCAL switch (top bar)
+## Going offline — two ways
 
-| Mode | Where everything loads from |
-|------|------------------------------|
-| **WEB** (default) | jsDelivr (libraries) + huggingface.co (weights) |
-| **LOCAL** | the project folder only — fully offline, no network |
+**A. Cache button (WEB mode).** Settings → **Cache everything for offline**. A service worker stores the libraries + current models in the browser; afterwards WEB mode runs with no network.
 
-Flipping the switch reloads with a different import map. **LOCAL** needs the assets vendored first:
+**B. LOCAL mode (ship the folder).** Vendor everything into the project, then flip the switch to **LOCAL**:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/fetch-offline.ps1
+powershell -ExecutionPolicy Bypass -File tools/fetch-offline.ps1   # ~296 MB (q8). add -With360 for the 360M model
 ```
 
-This pulls libraries into `vendor/` and `q8` model weights into `models/` (~250 MB, idempotent — re-run any time, `-Force` to refresh). If LOCAL is selected without the assets present, the app stays on WEB and tells you to run the script.
-
-## Dark / light
-
-The ☾ / ☀ button toggles theme instantly (persisted in `localStorage`). No reload.
+If LOCAL is selected without the assets present, the app stays on WEB and tells you what to run.
 
 ## Layout
 
 ```
-index.html        bootstrap: theme + WEB/LOCAL → injects import map → loads app.js
-app.js            chat + Kokoro speech + audio→mouth metering + UI
-face.js           three.js WebGPU talking head (procedural lip-sync)
-styles.css        analog-broadcast design system (2 themes)
-vendor/stub-empty.js   browser no-ops for node built-ins kokoro-js imports
-tools/fetch-offline.ps1   downloads everything for LOCAL mode
+index.html   bootstrap: CSP + SRI import map + SW/PWA + theme → loads app.js
+app.js       orchestrator: chat → stream → speak → emote, settings, offline, controls
+face.js      three.js WebGPU head (visemes + mood + gaze)
+speech.js    Kokoro streaming, gapless playback, viseme timeline, captions, metering
+llm.js       streaming text-generation (model/dtype/device)
+stt.js       Whisper push-to-talk
+emotion.js   heuristic mood    persist.js  conversation memory
+styles.css   analog-broadcast design system (2 themes)
+sw.js        offline service worker      manifest.webmanifest  icons/
+vendor/stub-empty.js   node built-in no-ops for kokoro-js
+tools/       fetch-offline.ps1 + Playwright tests (smoke / e2e-plus / stt / offline)
 ```
 
-`vendor/<libs>` and `models/` are git-ignored (regenerated by the script).
+`vendor/<libs>`, `models/`, `node_modules/` are git-ignored (regenerated by the script / npm).
+
+## Tests
+
+```powershell
+node tools/smoke.mjs http://127.0.0.1:5173/        # wiring, theme, face
+node tools/e2e-plus.mjs http://127.0.0.1:5173      # streaming, captions, ON AIR, stop, settings, SW
+node tools/stt-test.mjs http://127.0.0.1:5173      # Whisper transcription
+node tools/offline-test.mjs http://127.0.0.1:5173  # full loop with all external network blocked
+```

@@ -2,8 +2,23 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net blob:;
+    worker-src 'self' blob:;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com data:;
+    img-src 'self' data: blob:;
+    connect-src 'self' https: data: blob:;
+    manifest-src 'self';
+    base-uri 'self';
+  " />
   <title>ANCHOR — local AI presenter</title>
+  <meta name="theme-color" content="#0a0b0d" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -20,6 +35,8 @@
   </div>
 
   <div class="controls">
+    <button class="iconbtn" id="installBtn" title="Install app" aria-label="Install" hidden><span class="glyph-install"></span></button>
+
     <div class="switch" id="modeSwitch" role="switch" aria-label="Asset source" tabindex="0" title="Where models &amp; libraries load from">
       <span class="switch__track">
         <span class="switch__opt" data-mode="online">WEB</span>
@@ -28,13 +45,11 @@
       </span>
     </div>
 
-    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme">
-      <span class="themeglyph"></span>
-    </button>
+    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="themeglyph"></span></button>
+    <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="glyph-gear"></span></button>
 
     <div class="statuspill" title="Runtime status">
-      <span id="led" class="led"></span>
-      <span id="status">idle</span>
+      <span id="led" class="led"></span><span id="status">idle</span>
     </div>
   </div>
 </header>
@@ -48,16 +63,12 @@
       <div class="hud__top">
         <div class="onair" id="onair"><span class="onair__dot"></span><span id="onairTxt">STANDBY</span></div>
         <div class="hud__right">
-          <label class="field">
-            <span class="field__lbl">voice</span>
-            <select id="voice" class="select"></select>
-          </label>
-          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice">
-            <span class="muteglyph"></span>
-          </button>
+          <label class="field"><span class="field__lbl">voice</span><select id="voice" class="select"></select></label>
+          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice"><span class="muteglyph"></span></button>
         </div>
       </div>
       <div class="hud__bottom">
+        <div id="caption" class="caption" aria-live="polite"></div>
         <canvas id="wave" class="wave"></canvas>
       </div>
     </div>
@@ -69,6 +80,7 @@
       <div class="meta">
         <span class="tag">LLM</span><code id="llmId">—</code>
         <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
+        <span class="tag tag--dev" id="devTag" hidden>—</span>
       </div>
       <div class="console__actions">
         <button class="btn" id="preload">warm up</button>
@@ -79,99 +91,140 @@
     <div id="chat" class="chat" aria-live="polite"></div>
 
     <div class="composer">
-      <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter for a newline"></textarea>
-      <button class="btn btn--send" id="send" disabled>send</button>
+      <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="glyph-mic"></span></button>
+      <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter newline · 🎙 to talk"></textarea>
+      <div class="composer__send">
+        <button class="btn btn--stop" id="stopBtn" title="Stop speaking" hidden>stop</button>
+        <button class="btn btn--send" id="send" disabled>send</button>
+      </div>
     </div>
   </section>
 </main>
+
+<!-- settings drawer -->
+<div id="settingsPanel" class="drawer" aria-hidden="true">
+  <div class="drawer__scrim" data-close></div>
+  <aside class="drawer__panel" role="dialog" aria-label="Settings">
+    <div class="drawer__head"><h2>Settings</h2><button class="iconbtn iconbtn--sm" data-close aria-label="Close">✕</button></div>
+
+    <div class="set">
+      <label class="set__row"><span>Speaking rate</span><span class="mono" id="speedVal">1.00×</span></label>
+      <input type="range" id="speed" min="0.6" max="1.4" step="0.05" value="1" />
+    </div>
+    <div class="set">
+      <label class="set__row" for="modelSel"><span>Language model</span></label>
+      <select id="modelSel" class="select select--block"></select>
+    </div>
+    <div class="set set--grid">
+      <div><label class="set__row" for="dtypeSel"><span>Precision</span></label>
+        <select id="dtypeSel" class="select select--block">
+          <option value="q8">q8 (small)</option>
+          <option value="q4f16">q4f16</option>
+          <option value="fp16">fp16</option>
+          <option value="fp32">fp32 (best)</option>
+        </select></div>
+      <div><label class="set__row" for="deviceSel"><span>Compute</span></label>
+        <select id="deviceSel" class="select select--block">
+          <option value="auto">auto</option>
+          <option value="webgpu">WebGPU</option>
+          <option value="wasm">wasm (CPU)</option>
+        </select></div>
+    </div>
+
+    <div class="set set--actions">
+      <button class="btn btn--wide" id="cacheBtn">Cache everything for offline</button>
+      <p class="set__hint" id="cacheHint">Stores libraries + the current models in the browser so WEB mode keeps working with no internet.</p>
+      <button class="btn btn--ghost btn--wide" id="clearBtn">Clear conversation</button>
+    </div>
+  </aside>
+</div>
 
 <div id="overlay" class="overlay" aria-hidden="true">
   <div class="modal">
     <div class="modal__top">
       <div class="ring" id="ring" style="--p:0%"></div>
-      <div class="modal__txt">
-        <div class="modal__title" id="ovTitle">loading…</div>
-        <div class="modal__line" id="ovLine">preparing</div>
-      </div>
+      <div class="modal__txt"><div class="modal__title" id="ovTitle">loading…</div><div class="modal__line" id="ovLine">preparing</div></div>
       <div class="modal__pct" id="ovPct">0%</div>
     </div>
     <div class="modal__bar"><div id="barFill" class="modal__fill" style="--w:0%"></div></div>
-    <div class="modal__row">
-      <span id="ovFile">—</span><span id="ovBytes">—</span>
-    </div>
+    <div class="modal__row"><span id="ovFile">—</span><span id="ovBytes">—</span></div>
     <div class="modal__hint" id="ovHint">First run downloads model weights and caches them in the browser.</div>
   </div>
 </div>
 
-<!-- Bootstrap: pick theme + asset mode, inject the matching import map, then load the app. -->
+<!-- Bootstrap: theme + asset mode → inject matching import map (with SRI online) → load app + SW. -->
 <script>
 (async () => {
   const selfScript = document.currentScript;
-  const root = document.documentElement;
-
-  // ---- theme (no reload needed) ----
-  const theme = localStorage.getItem('anchor.theme') || 'dark';
-  root.setAttribute('data-theme', theme);
-
-  // ---- asset mode ----
+  document.documentElement.setAttribute('data-theme', localStorage.getItem('anchor.theme') || 'dark');
   let mode = localStorage.getItem('anchor.mode') || 'online';
 
   const CDN = {
-    three:       'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js',
-    addons:      'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
-    basis:       'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
-    face:        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r180/examples/models/gltf/facecap.glb',
+    three:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js',
+    threeCore:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js',
+    addons:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
+    basis:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
+    face:'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r180/examples/models/gltf/facecap.glb',
     transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js',
-    wasm:        'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
-    kokoro:      'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
-    phonemizer:  'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
-    modelBase:   null,            // remote HF default
+    wasm:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
+    kokoro:'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
+    phonemizer:'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
+    modelBase:null,
   };
   const LOCAL = {
-    three:       './vendor/three/build/three.webgpu.js',
-    addons:      './vendor/three/jsm/',
-    basis:       './vendor/three/jsm/libs/basis/',
-    face:        './vendor/three/facecap.glb',
+    three:'./vendor/three/build/three.webgpu.js',
+    threeCore:'./vendor/three/build/three.core.js',
+    addons:'./vendor/three/jsm/',
+    basis:'./vendor/three/jsm/libs/basis/',
+    face:'./vendor/three/facecap.glb',
     transformers:'./vendor/transformers/transformers.min.js',
-    wasm:        new URL('./vendor/transformers/', document.baseURI).href, // absolute: ORT resolves its jsep .mjs against this (relative doubles the path)
-    kokoro:      './vendor/kokoro/kokoro.js',
-    phonemizer:  './vendor/phonemizer/phonemizer.js',
-    modelBase:   './models/',     // local HF mirror
+    wasm:new URL('./vendor/transformers/', document.baseURI).href,
+    kokoro:'./vendor/kokoro/kokoro.js',
+    phonemizer:'./vendor/phonemizer/phonemizer.js',
+    modelBase:'./models/',
+  };
+  // Subresource integrity for the pinned CDN libraries (WEB mode only).
+  const SRI = {
+    [CDN.three]:'sha384-SkTLw/lN3jv1UIxteuivToEdXgaEiflmc3P+f8n+GoIqsbu3KE8adYoNlmTYWg0u',
+    [CDN.threeCore]:'sha384-r1q8Si7xFBrvMv3Q4yjQkKhkYZ2lp+wn/bPPzNZTsc8DY4uPJmm2vheuz1Yn+8m8',
+    [CDN.transformers]:'sha384-G1EJHfr5gbjkceaa8ZspGjLIAgIIb0/8KUzIEo6hAgAtJ4R2EKhcfp35K2Yziqq/',
+    [CDN.kokoro]:'sha384-LKzWuVipppuVOK+ZMC5g3O4yAZNH9JzAc0lApim5v00ZcgRjgUJY4o3hHLhTivfN',
+    [CDN.phonemizer]:'sha384-w+2+zdHrz1bNypuNWcuFSZ+lMZIDvqjQsAHIHSu/L7QRv91/YI4G2Q7kypzaCtEx',
   };
 
-  // If offline was requested but the vendored libs aren't present, fall back to web.
   let missing = false;
   if (mode === 'offline') {
-    try {
-      const r = await fetch(LOCAL.transformers, { method: 'HEAD', cache: 'no-store' });
-      if (!r.ok) missing = true;
-    } catch { missing = true; }
+    try { const r = await fetch(LOCAL.transformers, { method: 'HEAD', cache: 'no-store' }); if (!r.ok) missing = true; }
+    catch { missing = true; }
     if (missing) mode = 'online';
   }
 
   const A = mode === 'offline' ? LOCAL : CDN;
   window.__ANCHOR__ = { mode, requestedOffline: localStorage.getItem('anchor.mode') === 'offline', offlineMissing: missing, assets: A };
 
-  const imports = {
-    'three': A.three,
-    'three/webgpu': A.three,
-    'three/addons/': A.addons,
-    '@huggingface/transformers': A.transformers,
-    'kokoro-js': A.kokoro,
-    'phonemizer': A.phonemizer,
-    'path': './vendor/stub-empty.js',
-    'fs/promises': './vendor/stub-empty.js',
-  };
-
   const im = document.createElement('script');
   im.type = 'importmap';
-  im.textContent = JSON.stringify({ imports });
+  const map = {
+    imports: {
+      'three': A.three, 'three/webgpu': A.three, 'three/addons/': A.addons,
+      '@huggingface/transformers': A.transformers,
+      'kokoro-js': A.kokoro, 'phonemizer': A.phonemizer,
+      'path': './vendor/stub-empty.js', 'fs/promises': './vendor/stub-empty.js',
+    },
+  };
+  if (mode === 'online') {
+    map.integrity = { [CDN.three]: SRI[CDN.three], [CDN.threeCore]: SRI[CDN.threeCore], [CDN.transformers]: SRI[CDN.transformers], [CDN.kokoro]: SRI[CDN.kokoro], [CDN.phonemizer]: SRI[CDN.phonemizer] };
+  }
+  im.textContent = JSON.stringify(map);
   selfScript.after(im);
 
   const app = document.createElement('script');
-  app.type = 'module';
-  app.src = './app.js';
+  app.type = 'module'; app.src = './app.js';
   im.after(app);
+
+  if ('serviceWorker' in navigator) {
+    try { await navigator.serviceWorker.register('./sw.js'); } catch (e) { console.warn('SW register failed', e); }
+  }
 })();
 </script>
 </body>

@@ -115,6 +115,59 @@ h1{
 [data-theme="light"] .themeglyph::before{ content:"\2600"; }
 .muteglyph::before{ content:"\1F50A"; font-size:14px; }
 .muteglyph[data-muted="1"]::before{ content:"\1F507"; }
+.glyph-gear::before{ content:"\2699"; font-size:17px; }
+.glyph-install::before{ content:"\2B07"; font-size:15px; }
+.glyph-mic::before{ content:"\1F3A4"; font-size:16px; }
+
+/* device tag */
+.tag--dev{ background:color-mix(in srgb,var(--ink) 12%,transparent); color:var(--ink-dim); border:1px solid var(--line2); text-transform:uppercase }
+
+/* composer: mic + stop + send */
+.composer{ align-items:flex-end }
+.iconbtn--mic{ width:46px; height:46px; flex:0 0 auto; align-self:stretch }
+.iconbtn--mic.rec{ border-color:var(--red); color:var(--red); animation:pulse 1s infinite;
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--red) 18%,transparent) }
+.composer__send{ display:flex; flex-direction:column; gap:8px; align-self:stretch }
+.btn--stop{ background:color-mix(in srgb,var(--red) 18%,transparent); border-color:color-mix(in srgb,var(--red) 45%,transparent); color:var(--red); font-weight:600 }
+.btn--tiny{ padding:3px 9px; font-size:11px; border-radius:8px; margin-left:4px }
+
+/* captions over the viewport */
+.caption{ pointer-events:none; max-width:90%; margin:0 auto 8px; text-align:center;
+  font-family:"Fraunces",serif; font-size:18px; line-height:1.35; color:var(--ink);
+  text-shadow:0 2px 14px #000a, 0 0 2px #0008; opacity:0; transform:translateY(6px);
+  transition:opacity .2s ease, transform .2s ease }
+.caption.show{ opacity:1; transform:none }
+.caption span{ opacity:.45; transition:opacity .12s, color .12s }
+.caption span.said{ opacity:.7 }
+.caption span.now{ opacity:1; color:var(--amber) }
+[data-theme="light"] .caption{ color:#fff; text-shadow:0 2px 12px #0009 }
+[data-theme="light"] .caption span.now{ color:var(--amber) }
+
+/* settings drawer */
+.drawer{ position:fixed; inset:0; z-index:80; pointer-events:none }
+.drawer__scrim{ position:absolute; inset:0; background:color-mix(in srgb,var(--bg) 55%,transparent);
+  backdrop-filter:blur(4px); opacity:0; transition:opacity .25s }
+.drawer__panel{ position:absolute; top:0; right:0; height:100%; width:min(380px,92vw);
+  transform:translateX(102%); transition:transform .3s cubic-bezier(.4,1.1,.5,1);
+  background:linear-gradient(180deg,var(--panel),var(--panel2)); border-left:1px solid var(--line2);
+  box-shadow:var(--shadow); padding:18px; overflow:auto; display:flex; flex-direction:column; gap:18px }
+.drawer.open{ pointer-events:auto }
+.drawer.open .drawer__scrim{ opacity:1 }
+.drawer.open .drawer__panel{ transform:none }
+.drawer__head{ display:flex; align-items:center; justify-content:space-between }
+.drawer__head h2{ margin:0; font-family:"Fraunces",serif; font-weight:600; font-size:20px; letter-spacing:.02em }
+.set{ display:flex; flex-direction:column; gap:8px }
+.set--grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px }
+.set__row{ display:flex; align-items:center; justify-content:space-between; font-size:13px; color:var(--ink-dim) }
+.set__hint{ margin:0; font-size:11.5px; color:var(--muted); line-height:1.4 }
+.set--actions{ margin-top:auto; gap:10px; border-top:1px solid var(--line); padding-top:16px }
+.select--block{ width:100%; padding:9px 11px; border:1px solid var(--line2); border-radius:11px; background:var(--bg2);
+  background-position:right 10px center, right 14px center }
+.btn--wide{ width:100%; padding:11px; justify-content:center }
+input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:99px;
+  background:linear-gradient(90deg,var(--amber),var(--teal)); outline:none }
+input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+  background:var(--ink); border:2px solid var(--panel); box-shadow:0 2px 6px #0006; cursor:pointer }
 
 .statuspill{
   display:flex; align-items:center; gap:9px; padding:8px 13px; border-radius:999px;
@@ -181,7 +234,7 @@ h1{
   background-position:right 2px center, right 6px center; background-size:4px 4px,4px 4px; background-repeat:no-repeat;
 }
 .select option{ background:var(--panel); color:var(--ink) }
-.hud__bottom{ display:flex; align-items:flex-end }
+.hud__bottom{ display:flex; flex-direction:column; gap:6px }
 .wave{ width:100%; height:46px; opacity:.9 }
 
 .viewport__fallback{

@@ -6,7 +6,7 @@
   Footprint (q8 weights): ~250 MB. Run from anywhere:
       powershell -ExecutionPolicy Bypass -File tools/fetch-offline.ps1
 #>
-param([switch]$Force)
+param([switch]$Force, [switch]$With360)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -23,7 +23,9 @@ $KOKORO = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist'
 $PHON = 'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist'
 $HF = 'https://huggingface.co'
 $LLM = 'HuggingFaceTB/SmolLM2-135M-Instruct'
+$LLM360 = 'HuggingFaceTB/SmolLM2-360M-Instruct'
 $TTS = 'onnx-community/Kokoro-82M-v1.0-ONNX'
+$STT = 'onnx-community/whisper-tiny.en'
 $VOICES = @('af_heart','af_bella','af_nicole','am_michael','am_fenrir','am_puck','bf_emma','bm_george')
 
 # --- build the download list: @{ U = url; P = local path } ---
@@ -70,6 +72,18 @@ foreach ($f in @('config.json','tokenizer.json','tokenizer_config.json','onnx/mo
   Add-Item "$HF/$TTS/resolve/main/$f" "models/$TTS/$f"
 }
 foreach ($v in $VOICES) { Add-Item "$HF/$TTS/resolve/main/voices/$v.bin" "models/$TTS/voices/$v.bin" }
+
+# Whisper (voice input) weights (q8) + tokenizer
+foreach ($f in @('config.json','generation_config.json','preprocessor_config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','added_tokens.json','normalizer.json','onnx/encoder_model_quantized.onnx','onnx/decoder_model_merged_quantized.onnx')) {
+  Add-Item "$HF/$STT/resolve/main/$f" "models/$STT/$f"
+}
+
+# Optional: the larger 360M model for the in-app model picker (+~365 MB)
+if ($With360) {
+  foreach ($f in @('config.json','generation_config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','onnx/model_quantized.onnx')) {
+    Add-Item "$HF/$LLM360/resolve/main/$f" "models/$LLM360/$f"
+  }
+}
 
 # --- download ---
 $n = 0; $skipped = 0; $total = $items.Count
