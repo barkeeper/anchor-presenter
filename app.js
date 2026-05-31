@@ -1,13 +1,14 @@
 // ============================================================
 // app.js — ANCHOR orchestrator.
-// Wires: LLM (streaming) → Kokoro streaming voice → viseme/emotion face,
-// plus voice input (Whisper), captions, persistence, settings, a service
-// worker for offline caching, and the WEB/LOCAL + theme controls.
+// Heavy inference (LLM + Kokoro) runs in a Web Worker so the main thread stays
+// free to render the face in sync with audio. This file wires the worker, the
+// audio/face player, voice input, captions, persistence, settings, the service
+// worker, and the WEB/LOCAL + theme controls.
 // ============================================================
-import { KokoroTTS } from 'kokoro-js';
+import { env } from '@huggingface/transformers';   // configured for the main-thread STT instance
 import { createFace } from './face.js';
 import { createSpeech } from './speech.js';
-import { createLLM, LLM_MODELS, env } from './llm.js';
+import { createInference, LLM_MODELS } from './infer.js';
 import { createSTT } from './stt.js';
 import { detectMood } from './emotion.js';
 import { loadHistory, saveHistory, clearHistory } from './persist.js';
@@ -21,10 +22,10 @@ const VOICES = [
   { id: 'am_fenrir', label: 'Fenrir · US ♂' }, { id: 'am_puck', label: 'Puck · US ♂' },
   { id: 'bf_emma', label: 'Emma · UK ♀' }, { id: 'bm_george', label: 'George · UK ♂' },
 ];
-const DTYPE_FILE = { q8: 'model_quantized.onnx', fp16: 'model_fp16.onnx', q4f16: 'model_q4f16.onnx', fp32: 'model.onnx' };
+const DTYPE_FILE = { q8: 'model_quantized.onnx', q4f16: 'model_q4f16.onnx', fp16: 'model_fp16.onnx', fp32: 'model.onnx' };
 const SYSTEM = {
   role: 'system',
-  content: 'You are Anchor, a warm, concise on-screen presenter. Reply in plain spoken sentences (no markdown, lists or emoji) so your words sound natural read aloud. Keep answers brief unless asked for detail.',
+  content: 'You are Anchor, a warm, concise on-screen presenter. Reply in plain spoken sentences (no markdown, lists, headings or emoji) so your words sound natural read aloud. Keep it to a sentence or two unless asked for more.',
 };
 
 const settings = {
@@ -32,11 +33,11 @@ const settings = {
   speed: +(localStorage.getItem('anchor.speed') || 1),
   model: localStorage.getItem('anchor.model') || '135m',
   dtype: localStorage.getItem('anchor.dtype') || 'q8',
-  device: localStorage.getItem('anchor.device') || 'auto',
+  device: (localStorage.getItem('anchor.device') === 'webgpu') ? 'webgpu' : 'wasm',
   muted: localStorage.getItem('anchor.muted') === '1',
 };
 
-// transformers env — one place decides web vs local
+// main-thread transformers env (used only by Whisper STT) — worker configures its own
 env.allowLocalModels = CFG.mode === 'offline';
 env.allowRemoteModels = CFG.mode === 'online';
 if (CFG.mode === 'offline') env.localModelPath = A.modelBase;
@@ -71,7 +72,7 @@ if (CFG.requestedOffline && CFG.offlineMissing) {
 
 // ---------- state ----------
 let busy = false, face = null, recording = false, deferredPrompt = null;
-let tts = null, ttsLoading = null;
+let pending = null;   // { bubble, userText, first, moodLen }
 let history = loadHistory();
 
 // ---------- progress overlay ----------
@@ -85,15 +86,14 @@ function setProgress(pct, line, file, loaded, total) {
   if (line) el.ovLine.textContent = line; if (file) el.ovFile.textContent = file;
   el.ovBytes.textContent = (Number.isFinite(loaded) && total > 0) ? `${fmtBytes(loaded)} / ${fmtBytes(total)}` : '—';
 }
-function makeProgress(title) {
-  return (info) => {
-    const st = info?.status, file = info?.file || '';
-    if (st === 'initiate' || st === 'download') { el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `fetching ${file}`, file); }
-    else if (st === 'progress') { if (file) fileMap.set(file, { loaded: info.loaded, total: info.total }); el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `downloading ${file}`, file, info.loaded, info.total); }
-    else if (st === 'done') { if (file && fileMap.has(file)) { const v = fileMap.get(file); fileMap.set(file, { loaded: v.total ?? v.loaded, total: v.total ?? v.loaded }); } setProgress(overallPct(), `unpacking ${file}`, file); }
-    else if (st === 'ready') { setProgress(100, 'ready', info.model || ''); setTimeout(() => showOverlay(false), 220); }
-  };
+function progress(title, info) {
+  const st = info?.status, file = info?.file || '';
+  if (st === 'initiate' || st === 'download') { el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `fetching ${file}`, file); }
+  else if (st === 'progress') { if (file) fileMap.set(file, { loaded: info.loaded, total: info.total }); el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `downloading ${file}`, file, info.loaded, info.total); }
+  else if (st === 'done') { if (file && fileMap.has(file)) { const v = fileMap.get(file); fileMap.set(file, { loaded: v.total ?? v.loaded, total: v.total ?? v.loaded }); } setProgress(overallPct(), `unpacking ${file}`, file); }
+  else if (st === 'ready') { setProgress(100, 'ready', info.model || ''); setTimeout(() => showOverlay(false), 220); }
 }
+const makeProgress = (title) => (info) => progress(title, info);   // for stt.js
 
 // ---------- UI helpers ----------
 const setLED = (m) => { el.led.className = 'led' + (m ? ' ' + m : ''); };
@@ -114,7 +114,7 @@ function addMsg(role, content) {
 }
 const typingNode = () => { const s = document.createElement('span'); s.className = 'typing'; s.innerHTML = '<span></span><span></span><span></span>'; return s; };
 function renderError(bubble, lastText, e) {
-  bubble.innerHTML = ''; bubble.append('Error: ' + (e?.message ?? String(e)) + ' ');
+  bubble.innerHTML = ''; bubble.append('Error: ' + (e ?? 'unknown') + ' ');
   const r = document.createElement('button'); r.className = 'btn btn--ghost btn--tiny'; r.textContent = 'retry';
   r.onclick = () => { bubble.closest('.msg').remove(); sendMessage(lastText); };
   bubble.append(r);
@@ -128,10 +128,19 @@ const getMessages = () => [SYSTEM, ...history.slice(-12)];
 function updateDevTag(device, dtype) { el.devTag.hidden = false; el.devTag.textContent = dtype ? `${device} ${dtype}` : device; }
 
 // ---------- modules ----------
-const speech = createSpeech({ face: null, onCaption, onState, onError: (e) => console.error('speech', e) });
+const speech = createSpeech({ face: null, onCaption, onState });
 speech.setMuted(settings.muted);
-const llm = createLLM({ onProgress: makeProgress('language model') });
 const stt = createSTT({ onProgress: makeProgress('speech recognizer') });
+const PROG_TITLE = { llm: 'language model', tts: 'voice model' };
+const inference = createInference({
+  assets: A, offline: CFG.mode === 'offline',
+  onProgress: (phase, info) => progress(PROG_TITLE[phase] || 'model', info),
+  onLoaded: (device, dtype) => updateDevTag(device, dtype),
+  onToken: (clean) => { if (!pending) return; if (pending.first) { pending.bubble.textContent = ''; pending.first = false; } pending.bubble.textContent = clean; scrollBottom(); if (clean.length - pending.moodLen > 28) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); pending.moodLen = clean.length; } },
+  onAudio: (chunk) => speech.enqueue(chunk),
+  onDone: (reply) => { if (!pending) return; pending.bubble.textContent = reply; history.push({ role: 'assistant', content: reply }); saveHistory(history); const m = detectMood(reply); face?.setMood(m.mood, m.intensity); speech.end(); setStatus('ready'); setLED('ready'); setBusy(false); pending = null; },
+  onError: (errMsg) => { console.error('infer:', errMsg); if (pending) { renderError(pending.bubble, pending.userText, errMsg); pending = null; } else { setStatus('error'); } speech.cancel(); setOnAir('idle'); setLED('err'); setBusy(false); showOverlay(false); },
+});
 
 function onState(state) {
   if (state === 'speaking') { setOnAir('live'); el.stopBtn.hidden = false; }
@@ -143,9 +152,8 @@ function onCaption(text, wi) {
   el.caption.innerHTML = text.split(/\s+/).map((w, i) => `<span class="${i < wi ? 'said' : i === wi ? 'now' : ''}">${esc(w)}</span>`).join(' ');
 }
 
-// kokoro-js fetches voice .bin files from a fixed HF URL (with a "kokoro-voices"
-// Cache layer) instead of localModelPath. In LOCAL mode, pre-seed that cache
-// from the on-disk voices so speech works with no network.
+// kokoro fetches voice .bin from a fixed HF URL via the "kokoro-voices" Cache.
+// In LOCAL mode, seed that cache (shared with the worker) from the on-disk voices.
 async function maybeSeedVoices() {
   if (CFG.mode !== 'offline' || !('caches' in window)) return;
   try {
@@ -159,47 +167,22 @@ async function maybeSeedVoices() {
   } catch (e) { console.warn('voice seed failed', e); }
 }
 
-async function ensureTTS() {
-  if (tts) return tts;
-  if (ttsLoading) return ttsLoading;
-  await maybeSeedVoices();
-  fileMap.clear(); showOverlay(true); el.ovTitle.textContent = 'loading voice model…'; setProgress(0, 'preparing', '—');
-  ttsLoading = KokoroTTS.from_pretrained(TTS_ID, { dtype: 'q8', device: 'wasm', progress_callback: makeProgress('voice model') })
-    .then((t) => { tts = t; speech.attachTTS(t); setStatus('ready'); setLED('ready'); return t; })
-    .catch((e) => { console.error(e); setStatus('tts error'); setLED('err'); showOverlay(false); throw e; })
-    .finally(() => { ttsLoading = null; });
-  return ttsLoading;
-}
-
-// ---------- the main loop: chat → stream → speak → emote ----------
-function setBusy(on) { busy = !!on; el.send.disabled = busy || !el.input.value.trim(); el.reset.disabled = busy; el.preload.disabled = busy || llm.loaded || llm.busy; el.micBtn.disabled = busy; }
+// ---------- the main loop ----------
+function setBusy(on) { busy = !!on; el.send.disabled = busy || !el.input.value.trim(); el.reset.disabled = busy; el.preload.disabled = busy; el.micBtn.disabled = busy; }
 
 async function sendMessage(raw) {
   const text = (raw ?? '').trim();
   if (!text || busy) return;
-  speech.cancel(); setOnAir('idle'); setBusy(true);
+  speech.cancel(); inference.cancel(); setOnAir('idle'); setBusy(true);
   addMsg('user', text); history.push({ role: 'user', content: text }); saveHistory(history);
   const bubble = addMsg('assistant', typingNode());
   setOnAir('think'); setStatus('thinking'); setLED('busy');
-  const opts = { modelKey: settings.model, dtype: settings.dtype, device: settings.device, maxTokens: 220 };
-  try {
-    await ensureTTS();
-    const { device, dtype } = await llm.ensure(opts); updateDevTag(device, dtype);
-    const ctrl = speech.start({ voice: settings.voice, speed: settings.speed });
-    let first = true, moodLen = 0;
-    const reply = await llm.generate(getMessages(), opts, (piece, clean) => {
-      if (first) { bubble.textContent = ''; first = false; }
-      bubble.textContent = clean; scrollBottom();
-      ctrl.push(piece);
-      if (clean.length - moodLen > 28) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); moodLen = clean.length; }
-    });
-    ctrl.close();
-    const m = detectMood(reply); face?.setMood(m.mood, m.intensity);
-    bubble.textContent = reply;
-    history.push({ role: 'assistant', content: reply }); saveHistory(history);
-    setStatus('ready'); setLED('ready');
-  } catch (e) { console.error(e); renderError(bubble, text, e); setStatus('error'); setLED('err'); speech.cancel(); setOnAir('idle'); }
-  finally { setBusy(false); el.input.focus(); }
+  pending = { bubble, userText: text, first: true, moodLen: 0 };
+  fileMap.clear();
+  await maybeSeedVoices();
+  await inference.ready;
+  speech.begin();
+  inference.generate({ messages: getMessages(), opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device, maxTokens: 160 }, ttsId: TTS_ID, voice: settings.voice, speed: settings.speed });
 }
 
 // ---------- waveform ----------
@@ -227,26 +210,26 @@ async function micToggle() {
     catch (e) { console.error(e); el.banner.hidden = false; el.banner.textContent = 'Microphone access denied or unavailable.'; }
   } else {
     recording = false; el.micBtn.classList.remove('rec'); setStatus('transcribing'); setLED('busy');
-    try { const text = await stt.stopAndTranscribe(); setStatus('ready'); setLED('ready'); if (text) sendMessage(text); }
+    try { const t = await stt.stopAndTranscribe(); setStatus('ready'); setLED('ready'); if (t) sendMessage(t); }
     catch (e) { console.error(e); setStatus('stt error'); setLED('err'); }
   }
 }
 
-// ---------- service worker / offline caching ----------
+// ---------- offline caching (service worker) ----------
 function llmFileList() {
   const id = LLM_MODELS[settings.model].id, base = `https://huggingface.co/${id}/resolve/main/`;
   return ['config.json', 'generation_config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt', `onnx/${DTYPE_FILE[settings.dtype] || DTYPE_FILE.q8}`].map((f) => base + f);
 }
 function buildPrecacheList() {
-  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './llm.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js'];
-  const libs = [A.three, A.threeCore || (CFG.mode === 'online' ? 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js' : './vendor/three/build/three.core.js'), A.transformers, A.kokoro, A.phonemizer, A.face,
+  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './infer-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js'];
+  const core = CFG.mode === 'online' ? 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js' : './vendor/three/build/three.core.js';
+  const libs = [A.three, core, A.transformers, A.kokoro, A.phonemizer, A.face,
     A.addons + 'environments/RoomEnvironment.js', A.addons + 'loaders/GLTFLoader.js', A.addons + 'loaders/KTX2Loader.js',
     A.addons + 'libs/ktx-parse.module.js', A.addons + 'libs/zstddec.module.js', A.addons + 'libs/meshopt_decoder.module.js',
     A.addons + 'math/ColorSpaces.js', A.addons + 'utils/BufferGeometryUtils.js', A.addons + 'utils/WorkerPool.js',
     A.basis + 'basis_transcoder.js', A.basis + 'basis_transcoder.wasm', A.wasm + 'ort-wasm-simd-threaded.jsep.wasm', A.wasm + 'ort-wasm-simd-threaded.jsep.mjs'];
   const tts = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/model_quantized.onnx', ...VOICES.map((v) => `voices/${v.id}.bin`)].map((f) => `https://huggingface.co/${TTS_ID}/resolve/main/${f}`);
   const whisper = ['config.json', 'generation_config.json', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/encoder_model_quantized.onnx', 'onnx/decoder_model_merged_quantized.onnx'].map((f) => `https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/${f}`);
-  // only cache remote (http) urls explicitly; local files are same-origin and cached by the shell entries
   return [...shell, ...libs, ...llmFileList(), ...tts, ...whisper].filter((u, i, a) => u && a.indexOf(u) === i);
 }
 async function cacheForOffline() {
@@ -280,10 +263,10 @@ const openSettings = (on) => { el.settingsPanel.classList.toggle('open', on); el
 el.input.addEventListener('input', () => { el.send.disabled = busy || !el.input.value.trim(); });
 el.input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); } });
 el.send.addEventListener('click', () => { const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); });
-el.stopBtn.addEventListener('click', () => { speech.cancel(); setOnAir('idle'); });
+el.stopBtn.addEventListener('click', () => { speech.cancel(); inference.cancel(); setOnAir('idle'); });
 el.micBtn.addEventListener('click', micToggle);
-el.preload.addEventListener('click', async () => { if (busy) return; setBusy(true); try { const { device, dtype } = await llm.ensure({ modelKey: settings.model, dtype: settings.dtype, device: settings.device }); updateDevTag(device, dtype); } catch (e) { console.error(e); } finally { setBusy(false); } });
-el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
+el.preload.addEventListener('click', async () => { if (busy) return; fileMap.clear(); await inference.ready; inference.load({ opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device }, ttsId: TTS_ID }); });
+el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); inference.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
 
 el.voice.addEventListener('change', () => { settings.voice = el.voice.value; localStorage.setItem('anchor.voice', settings.voice); });
 el.speed.addEventListener('input', () => { settings.speed = +el.speed.value; el.speedVal.textContent = settings.speed.toFixed(2) + '×'; localStorage.setItem('anchor.speed', settings.speed); });
@@ -304,13 +287,11 @@ el.modeSwitch.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.ke
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; el.installBtn.hidden = false; });
 el.installBtn.addEventListener('click', async () => { if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; el.installBtn.hidden = true; } });
 window.addEventListener('resize', () => face?.resize());
-
-// gaze: eyes follow the cursor over the viewport
 el.faceCanvas.addEventListener('pointermove', (e) => { const r = el.faceCanvas.getBoundingClientRect(); face?.setGazeTarget(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1)); });
 el.faceCanvas.addEventListener('pointerleave', () => face?.setGazeTarget(0, 0));
 
 // ---------- boot ----------
-restoreChat(); setStatus('idle'); setLED(''); setBusy(false); el.input.focus(); drawWave();
+restoreChat(); setStatus('idle'); setLED(''); setBusy(false); el.input.focus(); drawWave(); maybeSeedVoices();
 (async () => {
   try { face = await createFace({ canvas: el.faceCanvas, modelUrl: A.face, basisPath: A.basis }); speech.setFace(face); }
   catch (e) { console.error('Face init failed:', e); el.faceFallback.hidden = false; el.faceFallback.innerHTML = 'The animated face needs WebGPU (or WebGL2).<br/>Chat & voice still work — try a recent Chrome/Edge.'; }

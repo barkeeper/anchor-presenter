@@ -18,7 +18,8 @@ Three projects fused into one single-page app that runs **100% in the browser**,
 | **Captions** | Karaoke-style captions sync to the spoken words. |
 | **Memory** | The conversation persists across reloads. |
 | **Settings** | Voice, speaking rate, model (135M/360M), precision, and compute device. |
-| **WebGPU** | LLM auto-uses WebGPU when available (falls back to wasm). |
+| **Off-main-thread** | The LLM + Kokoro run in a Web Worker, so the main thread stays free and the face renders in sync with the audio. |
+| **WebGPU** | The 3D face uses WebGPU; the LLM defaults to CPU (so the GPU is free for the face) and can opt into WebGPU in settings. |
 | **PWA / offline** | Installable; a service worker caches everything so WEB mode keeps working with no internet. |
 | **WEB ⇄ LOCAL** | Switch every asset source between CDN+HF and the local project folder. |
 | **Dark / light** | Instant theme toggle. |
@@ -50,12 +51,13 @@ If LOCAL is selected without the assets present, the app stays on WEB and tells 
 ## Layout
 
 ```
-index.html   bootstrap: CSP + SRI import map + SW/PWA + theme → loads app.js
-app.js       orchestrator: chat → stream → speak → emote, settings, offline, controls
-face.js      three.js WebGPU head (visemes + mood + gaze)
-speech.js    Kokoro streaming, gapless playback, viseme timeline, captions, metering
-llm.js       streaming text-generation (model/dtype/device)
-stt.js       Whisper push-to-talk
+index.html        bootstrap: CSP + SRI import map + SW/PWA + theme → loads app.js
+app.js            orchestrator: chat → stream → speak → emote, settings, offline, controls
+infer-worker.js   Web Worker running BOTH the LLM and Kokoro (shared transformers instance)
+infer.js          main-thread client for the worker
+face.js           three.js WebGPU head (visemes + mood + gaze)
+speech.js         audio player: gapless playback, viseme timeline, captions, metering
+stt.js            Whisper push-to-talk
 emotion.js   heuristic mood    persist.js  conversation memory
 styles.css   analog-broadcast design system (2 themes)
 sw.js        offline service worker      manifest.webmanifest  icons/

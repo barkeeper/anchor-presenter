@@ -3,9 +3,9 @@
 // • same-origin: network-first (so edits show), fall back to cache.
 // • CDN / HuggingFace / fonts: cache-first (version-pinned, immutable).
 // • message {type:'precache', urls} → fetch + cache a list, report progress.
-const CACHE = 'anchor-v1';
+const CACHE = 'anchor-v2';
 const SHELL = [
-  './', './index.html', './app.js', './face.js', './speech.js', './llm.js',
+  './', './index.html', './app.js', './face.js', './speech.js', './infer.js', './infer-worker.js',
   './stt.js', './emotion.js', './persist.js', './styles.css',
   './manifest.webmanifest', './vendor/stub-empty.js',
   './icons/icon-192.png', './icons/icon-512.png',

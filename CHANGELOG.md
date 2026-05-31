@@ -11,3 +11,7 @@
 - "do them all, report back when all are finished" — implemented all 10: streaming token→speech, phoneme viseme lip-sync, Whisper push-to-talk voice input, in-app offline cache button, PWA + service worker, WebGPU LLM with wasm fallback, heuristic emotion-matched face, live captions + conversation memory, cursor gaze + saccades + speaking head-turn, and a settings drawer (voice/rate/model/precision/device) + stop button + retry + CSP/SRI.
 
 - "btw also kill the dev server on port 5173, and restart it with this project" — killed the existing node server on 5173 and restarted it serving this project.
+
+- "When I chat to the model now ... it responds with [gibberish] ... it worked before" — fixed: the WebGPU backend ran int8 (q8) weights and emitted garbage. The LLM now uses q4f16 on WebGPU (q8 on wasm).
+
+- "The face does not animate at all ... only at point 8 does the face move and the karaoke text show" / "it speaks everything up to point 8 fine, THEN the face starts talking" — fixed: on-device inference on the main thread was starving the render loop, so the face/captions only caught up at the end while audio played. Moved BOTH the LLM and Kokoro into a Web Worker (sharing one transformers instance) so the main thread stays free and the face animates in sync with speech. Also made the LLM default to CPU so the GPU stays dedicated to the 3D face.
