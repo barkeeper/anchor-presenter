@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>ANCHOR — local AI presenter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <div class="sigil" aria-hidden="true"><span></span></div>
+    <div class="brandtext">
+      <h1>ANCHOR</h1>
+      <p class="sub">a local AI presenter · chat → kokoro voice → living face</p>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="switch" id="modeSwitch" role="switch" aria-label="Asset source" tabindex="0" title="Where models &amp; libraries load from">
+      <span class="switch__track">
+        <span class="switch__opt" data-mode="online">WEB</span>
+        <span class="switch__opt" data-mode="offline">LOCAL</span>
+        <span class="switch__knob" aria-hidden="true"></span>
+      </span>
+    </div>
+
+    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme">
+      <span class="themeglyph"></span>
+    </button>
+
+    <div class="statuspill" title="Runtime status">
+      <span id="led" class="led"></span>
+      <span id="status">idle</span>
+    </div>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main class="stage">
+  <section class="panel viewport">
+    <canvas id="face"></canvas>
+    <div class="hud">
+      <div class="hud__top">
+        <div class="onair" id="onair"><span class="onair__dot"></span><span id="onairTxt">STANDBY</span></div>
+        <div class="hud__right">
+          <label class="field">
+            <span class="field__lbl">voice</span>
+            <select id="voice" class="select"></select>
+          </label>
+          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice">
+            <span class="muteglyph"></span>
+          </button>
+        </div>
+      </div>
+      <div class="hud__bottom">
+        <canvas id="wave" class="wave"></canvas>
+      </div>
+    </div>
+    <div class="viewport__fallback" id="faceFallback" hidden></div>
+  </section>
+
+  <section class="panel console">
+    <div class="console__head">
+      <div class="meta">
+        <span class="tag">LLM</span><code id="llmId">—</code>
+        <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
+      </div>
+      <div class="console__actions">
+        <button class="btn" id="preload">warm up</button>
+        <button class="btn btn--ghost" id="reset">reset</button>
+      </div>
+    </div>
+
+    <div id="chat" class="chat" aria-live="polite"></div>
+
+    <div class="composer">
+      <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter for a newline"></textarea>
+      <button class="btn btn--send" id="send" disabled>send</button>
+    </div>
+  </section>
+</main>
+
+<div id="overlay" class="overlay" aria-hidden="true">
+  <div class="modal">
+    <div class="modal__top">
+      <div class="ring" id="ring" style="--p:0%"></div>
+      <div class="modal__txt">
+        <div class="modal__title" id="ovTitle">loading…</div>
+        <div class="modal__line" id="ovLine">preparing</div>
+      </div>
+      <div class="modal__pct" id="ovPct">0%</div>
+    </div>
+    <div class="modal__bar"><div id="barFill" class="modal__fill" style="--w:0%"></div></div>
+    <div class="modal__row">
+      <span id="ovFile">—</span><span id="ovBytes">—</span>
+    </div>
+    <div class="modal__hint" id="ovHint">First run downloads model weights and caches them in the browser.</div>
+  </div>
+</div>
+
+<!-- Bootstrap: pick theme + asset mode, inject the matching import map, then load the app. -->
+<script>
+(async () => {
+  const selfScript = document.currentScript;
+  const root = document.documentElement;
+
+  // ---- theme (no reload needed) ----
+  const theme = localStorage.getItem('anchor.theme') || 'dark';
+  root.setAttribute('data-theme', theme);
+
+  // ---- asset mode ----
+  let mode = localStorage.getItem('anchor.mode') || 'online';
+
+  const CDN = {
+    three:       'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js',
+    addons:      'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
+    basis:       'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
+    face:        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r180/examples/models/gltf/facecap.glb',
+    transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js',
+    wasm:        'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
+    kokoro:      'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
+    phonemizer:  'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
+    modelBase:   null,            // remote HF default
+  };
+  const LOCAL = {
+    three:       './vendor/three/build/three.webgpu.js',
+    addons:      './vendor/three/jsm/',
+    basis:       './vendor/three/jsm/libs/basis/',
+    face:        './vendor/three/facecap.glb',
+    transformers:'./vendor/transformers/transformers.min.js',
+    wasm:        new URL('./vendor/transformers/', document.baseURI).href, // absolute: ORT resolves its jsep .mjs against this (relative doubles the path)
+    kokoro:      './vendor/kokoro/kokoro.js',
+    phonemizer:  './vendor/phonemizer/phonemizer.js',
+    modelBase:   './models/',     // local HF mirror
+  };
+
+  // If offline was requested but the vendored libs aren't present, fall back to web.
+  let missing = false;
+  if (mode === 'offline') {
+    try {
+      const r = await fetch(LOCAL.transformers, { method: 'HEAD', cache: 'no-store' });
+      if (!r.ok) missing = true;
+    } catch { missing = true; }
+    if (missing) mode = 'online';
+  }
+
+  const A = mode === 'offline' ? LOCAL : CDN;
+  window.__ANCHOR__ = { mode, requestedOffline: localStorage.getItem('anchor.mode') === 'offline', offlineMissing: missing, assets: A };
+
+  const imports = {
+    'three': A.three,
+    'three/webgpu': A.three,
+    'three/addons/': A.addons,
+    '@huggingface/transformers': A.transformers,
+    'kokoro-js': A.kokoro,
+    'phonemizer': A.phonemizer,
+    'path': './vendor/stub-empty.js',
+    'fs/promises': './vendor/stub-empty.js',
+  };
+
+  const im = document.createElement('script');
+  im.type = 'importmap';
+  im.textContent = JSON.stringify({ imports });
+  selfScript.after(im);
+
+  const app = document.createElement('script');
+  app.type = 'module';
+  app.src = './app.js';
+  im.after(app);
+})();
+</script>
+</body>
+</html>

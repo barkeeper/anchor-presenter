@@ -1,0 +1,15 @@
+# Offline assets — large, regenerate any time with tools/fetch-offline.ps1
+/vendor/three/
+/vendor/transformers/
+/vendor/kokoro/
+/vendor/phonemizer/
+/models/
+
+# misc
+.DS_Store
+Thumbs.db
+*.log
+
+/node_modules/
+package-lock.json
+shot_*.png
