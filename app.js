@@ -125,7 +125,7 @@ function restoreChat() {
   else for (const m of history) addMsg(m.role, m.content);
 }
 const getMessages = () => [SYSTEM, ...history.slice(-12)];
-function updateDevTag(device) { el.devTag.hidden = false; el.devTag.textContent = device; }
+function updateDevTag(device, dtype) { el.devTag.hidden = false; el.devTag.textContent = dtype ? `${device} ${dtype}` : device; }
 
 // ---------- modules ----------
 const speech = createSpeech({ face: null, onCaption, onState, onError: (e) => console.error('speech', e) });
@@ -184,7 +184,7 @@ async function sendMessage(raw) {
   const opts = { modelKey: settings.model, dtype: settings.dtype, device: settings.device, maxTokens: 220 };
   try {
     await ensureTTS();
-    const { device } = await llm.ensure(opts); updateDevTag(device);
+    const { device, dtype } = await llm.ensure(opts); updateDevTag(device, dtype);
     const ctrl = speech.start({ voice: settings.voice, speed: settings.speed });
     let first = true, moodLen = 0;
     const reply = await llm.generate(getMessages(), opts, (piece, clean) => {
@@ -282,7 +282,7 @@ el.input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftK
 el.send.addEventListener('click', () => { const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); });
 el.stopBtn.addEventListener('click', () => { speech.cancel(); setOnAir('idle'); });
 el.micBtn.addEventListener('click', micToggle);
-el.preload.addEventListener('click', async () => { if (busy) return; setBusy(true); try { const { device } = await llm.ensure({ modelKey: settings.model, dtype: settings.dtype, device: settings.device }); updateDevTag(device); } catch (e) { console.error(e); } finally { setBusy(false); } });
+el.preload.addEventListener('click', async () => { if (busy) return; setBusy(true); try { const { device, dtype } = await llm.ensure({ modelKey: settings.model, dtype: settings.dtype, device: settings.device }); updateDevTag(device, dtype); } catch (e) { console.error(e); } finally { setBusy(false); } });
 el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
 
 el.voice.addEventListener('change', () => { settings.voice = el.voice.value; localStorage.setItem('anchor.voice', settings.voice); });

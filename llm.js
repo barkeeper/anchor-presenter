@@ -14,27 +14,33 @@ export async function resolveDevice(pref) {
   catch { return 'wasm'; }
 }
 
+// int8 weights (q8/int8/uint8) are numerically broken on the WebGPU backend and
+// emit gibberish — use a GPU-safe precision there instead.
+const gpuSafeDtype = (dtype) => (['q8', 'int8', 'uint8'].includes(dtype) ? 'q4f16' : dtype);
+
 export function createLLM({ onProgress }) {
-  let gen = null, loading = null, key = '';
+  let gen = null, loading = null, key = '', usedDevice = '', usedDtype = '';
 
   async function ensure({ modelKey, dtype, device }) {
     const id = (LLM_MODELS[modelKey] || LLM_MODELS['135m']).id;
     const dev = await resolveDevice(device);
-    const wantKey = `${id}|${dtype}|${dev}`;
-    if (gen && (key === wantKey || key === `${id}|${dtype}|wasm`)) return { gen, device: dev };
+    const eff = dev === 'webgpu' ? gpuSafeDtype(dtype) : dtype;
+    const wantKey = `${id}|${eff}|${dev}`;
+    if (gen && key === wantKey) return { gen, device: usedDevice, dtype: usedDtype };
     if (loading && key === wantKey) return loading;
 
     if (gen && key !== wantKey) { try { await gen.dispose?.(); } catch {} gen = null; }
     key = wantKey;
-    const build = (d) => pipeline('text-generation', id, { dtype, device: d, progress_callback: onProgress });
-    loading = build(dev)
+    const build = (d, dt) => pipeline('text-generation', id, { dtype: dt, device: d, progress_callback: onProgress });
+    const settle = (g, d, dt) => { gen = g; usedDevice = d; usedDtype = dt; return { gen, device: d, dtype: dt }; };
+    loading = build(dev, eff)
+      .then((g) => settle(g, dev, eff))
       .catch((e) => {
         if (dev === 'wasm') throw e;
         console.warn('WebGPU pipeline failed, falling back to wasm:', e?.message || e);
         key = `${id}|${dtype}|wasm`;
-        return build('wasm').then((g) => ({ g, used: 'wasm' }));
+        return build('wasm', dtype).then((g) => settle(g, 'wasm', dtype));
       })
-      .then((r) => { gen = r.g || r; return { gen, device: r.used || dev }; })
       .finally(() => { loading = null; });
     return loading;
   }
