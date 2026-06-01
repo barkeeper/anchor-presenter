@@ -18,12 +18,19 @@ async function init(d) {
   env.allowLocalModels = !!d.offline; env.allowRemoteModels = !d.offline;
   if (d.offline && d.urls.localModelPath) env.localModelPath = d.urls.localModelPath;
   env.backends.onnx.wasm.wasmPaths = d.urls.wasm;
+  // single-threaded WASM works without SharedArrayBuffer / COOP+COEP — see llm-worker.js
+  env.backends.onnx.wasm.numThreads = 1;
+  env.backends.onnx.wasm.proxy = false;
   post({ type: 'ready' });
 }
+const TRANSIENT = /Failed to fetch|NetworkError|net::|ERR_|ECONN|ETIMEDOUT|timeout|timed out|\b(429|500|502|503|504)\b/i;
 async function ensureTTS(id) {
   if (tts && ttsId === id) return;
   ttsId = id;
-  tts = await KokoroTTS.from_pretrained(id, { dtype: 'q8', device: 'wasm', progress_callback: (info) => post({ type: 'progress', phase: 'tts', info }) });
+  for (let i = 0; i < 2; i++) {
+    try { tts = await KokoroTTS.from_pretrained(id, { dtype: 'q8', device: 'wasm', progress_callback: (info) => post({ type: 'progress', phase: 'tts', info }) }); return; }
+    catch (e) { if (i === 1 || !TRANSIENT.test(String(e?.message || e))) throw e; await new Promise((r) => setTimeout(r, 800 * (i + 1))); }
+  }
 }
 function cancel() { if (session) { session.cancelled = true; try { session.splitter.close(); } catch {} session = null; } }
 function begin(d) {
