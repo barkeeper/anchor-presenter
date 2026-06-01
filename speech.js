@@ -19,7 +19,7 @@ function phonemesToVisemes(ph) {
   return seq.length ? seq : ['MID'];
 }
 
-export function createSpeech({ face, onCaption, onState }) {
+export function createSpeech({ face, onCaption, onState, onSpoken }) {
   const AC = new (window.AudioContext || window.webkitAudioContext)();
   const analyser = AC.createAnalyser();
   analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.6;
@@ -30,7 +30,7 @@ export function createSpeech({ face, onCaption, onState }) {
   let session = null, muted = false;
   master.gain.value = 1; // app calls setMuted() with the saved preference
 
-  const begin = () => { cancel(); session = { clips: [], srcs: [], nextTime: 0, lastEnd: 0, started: false, ended: false, lastCaption: -1, lastCaptionText: '' }; AC.resume().catch(() => {}); };
+  const begin = () => { cancel(); session = { clips: [], srcs: [], nextTime: 0, lastEnd: 0, started: false, ended: false, lastCaption: -1, lastCaptionText: '', lastSpoken: '' }; AC.resume().catch(() => {}); };
 
   function enqueue(chunk) {
     if (!session) begin();
@@ -71,6 +71,16 @@ export function createSpeech({ face, onCaption, onState }) {
       const wi = Math.min(clip.words.length - 1, Math.floor(p * clip.words.length));
       if (clip.text !== s.lastCaptionText || wi !== s.lastCaption) { s.lastCaptionText = clip.text; s.lastCaption = wi; onCaption?.(clip.text, wi); }
     } else { face?.setViseme('sil'); }
+
+    // Cumulative spoken text (finished clips in full + the current clip up to the spoken word),
+    // so the chat bubble can reveal in lockstep with the voice instead of racing ahead of it.
+    let spoken = '';
+    for (const c of s.clips) {
+      if (t >= c.end) spoken += (spoken ? ' ' : '') + c.text;
+      else if (t >= c.start) { const wi = Math.min(c.words.length, Math.floor(((t - c.start) / c.dur) * c.words.length) + 1); spoken += (spoken ? ' ' : '') + c.words.slice(0, wi).join(' '); break; }
+      else break;
+    }
+    if (spoken !== s.lastSpoken) { s.lastSpoken = spoken; onSpoken?.(spoken); }
 
     if (s.ended && t > s.lastEnd + 0.05) {
       session = null;
