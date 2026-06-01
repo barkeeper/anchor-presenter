@@ -4,6 +4,9 @@
    Two themes via [data-theme]; warm amber + phosphor teal accents.
    ============================================================ */
 
+/* visually-hidden live region for screen-reader announcements */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+
 :root[data-theme="dark"]{
   --bg:#0a0b0d; --bg2:#0e1014; --grain:#ffffff;
   --panel:#13161c; --panel2:#0f1217; --line:#252b34; --line2:#323a46;
@@ -34,7 +37,8 @@ body{
     radial-gradient(900px 520px at 12% -8%, color-mix(in srgb, var(--amber) 14%, transparent), transparent 60%),
     radial-gradient(820px 520px at 100% 0%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 55%),
     linear-gradient(180deg, var(--bg2), var(--bg));
-  min-height:100vh;
+  height:100dvh;
+  display:flex; flex-direction:column;   /* header + banner + stage stack; stage fills the rest */
   overflow:hidden;
 }
 /* fine scanlines + grain overlay for the analog feel */
@@ -48,7 +52,7 @@ code, .mono{ font-family:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 
 /* ---------------- top bar ---------------- */
 .bar{
-  position:relative; z-index:20;
+  position:relative; z-index:20; flex:0 0 auto;
   display:flex; align-items:center; justify-content:space-between; gap:18px;
   padding:14px 22px;
   border-bottom:1px solid var(--line);
@@ -57,14 +61,10 @@ code, .mono{ font-family:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 }
 .brand{display:flex; align-items:center; gap:14px; min-width:0}
 .sigil{
-  width:40px; height:40px; border-radius:11px; flex:0 0 auto;
-  background:
-    radial-gradient(circle at 32% 28%, color-mix(in srgb,var(--amber) 85%,white), transparent 55%),
-    conic-gradient(from 200deg, var(--teal), var(--amber), var(--teal));
-  display:grid; place-items:center;
-  box-shadow: inset 0 0 0 1px #ffffff22, 0 8px 24px color-mix(in srgb,var(--amber) 30%, transparent);
+  flex:0 0 auto; display:grid; place-items:center;
+  font-family:"Fraunces", "Noto Serif JP", Georgia, serif;
+  font-size:34px; line-height:1; font-weight:500; color:var(--ink);
 }
-.sigil span{ width:13px; height:13px; border-radius:50%; background:var(--bg); box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ink) 40%,transparent); }
 .brandtext{min-width:0}
 h1{
   margin:0; font-family:"Fraunces", Georgia, serif; font-weight:600;
@@ -116,7 +116,8 @@ h1{
 .muteglyph::before{ content:"\1F50A"; font-size:14px; }
 .muteglyph[data-muted="1"]::before{ content:"\1F507"; }
 .glyph-gear::before{ content:"\2699"; font-size:17px; }
-.glyph-install::before{ content:"\2B07"; font-size:15px; }
+.glyph-install::before{ content:"\1F4E5"; font-size:16px; } /* 📥 inbox tray = install */
+#modeSwitch{ display:none } /* WEB/LOCAL switch hidden — app runs in WEB mode only */
 .glyph-mic::before{ content:"\1F3A4"; font-size:16px; }
 
 /* device tag */
@@ -183,7 +184,7 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; he
 
 /* notice banner */
 .banner{
-  position:relative; z-index:15; margin:0; padding:10px 22px;
+  position:relative; z-index:15; flex:0 0 auto; margin:0; padding:10px 22px;
   font-size:12.5px; letter-spacing:.02em; color:var(--amber-ink);
   background:linear-gradient(180deg, color-mix(in srgb,var(--amber) 86%,white), var(--amber));
   border-bottom:1px solid color-mix(in srgb,var(--amber) 60%, black);
@@ -194,7 +195,7 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; he
 .stage{
   position:relative; z-index:10;
   display:grid; grid-template-columns: 1.15fr .85fr; gap:16px;
-  padding:16px 22px 22px; height:calc(100vh - 71px);
+  padding:16px 22px 22px; flex:1 1 auto; min-height:0;   /* fill leftover height; banner no longer overflows */
 }
 .panel{
   position:relative; border:1px solid var(--line); border-radius:18px;
@@ -204,6 +205,12 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; he
 
 /* viewport */
 .viewport{ display:block }
+/* anime backdrop behind the VRM (canvas itself is alpha:true so this shows through) */
+.panel.viewport{
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ink) 0%, transparent) 0%, color-mix(in srgb, var(--ink) 28%, transparent) 100%),
+    url('./assets/face-bg.jpg') center/cover no-repeat;
+}
 #face{ position:absolute; inset:0; width:100%; height:100%; display:block }
 .viewport::before{ /* soft top sheen */
   content:""; position:absolute; inset:0; pointer-events:none; z-index:2;
@@ -250,6 +257,8 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; he
   background:linear-gradient(180deg, color-mix(in srgb,var(--panel) 80%, transparent), transparent);
 }
 .meta{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); min-width:0 }
+.meta--stacked{ margin-top:6px; gap:6px 8px }
+.meta--stacked code{ max-width:none }
 .meta code{ font-size:11px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px }
 .tag{ font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:.12em; padding:3px 6px; border-radius:6px;
   background:color-mix(in srgb,var(--amber) 22%,transparent); color:var(--amber); border:1px solid color-mix(in srgb,var(--amber) 40%,transparent) }
@@ -322,11 +331,12 @@ textarea:focus{ border-color:color-mix(in srgb,var(--amber) 60%,transparent); bo
 .modal__row{ margin-top:9px; display:flex; justify-content:space-between; gap:10px;
   font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--muted) }
 .modal__hint{ margin-top:9px; font-size:11.5px; color:var(--muted) }
+#ovCancel{ display:inline-block; margin-top:14px }
 
 /* ---------------- responsive ---------------- */
 @media (max-width: 900px){
-  body{ overflow:auto }
-  .stage{ grid-template-columns:1fr; height:auto }
+  body{ overflow:auto; height:auto; min-height:100dvh }   /* grow with content, scroll naturally */
+  .stage{ grid-template-columns:1fr; flex:0 0 auto; height:auto }
   .viewport{ height:46vh }
   .console{ height:62vh }
   h1{ font-size:19px }

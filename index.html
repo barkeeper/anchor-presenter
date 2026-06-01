@@ -14,23 +14,27 @@
     manifest-src 'self';
     base-uri 'self';
   " />
-  <title>ANCHOR — local AI presenter</title>
+  <title>SAKURA — local AI presenter</title>
   <meta name="theme-color" content="#0a0b0d" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="./icons/icon-192.png" sizes="192x192" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- warm the TLS connections to the lib CDN + model host so first-run downloads start sooner -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="preconnect" href="https://huggingface.co" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn-lfs.huggingface.co" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
 <header class="bar">
   <div class="brand">
-    <div class="sigil" aria-hidden="true"><span></span></div>
+    <div class="sigil" aria-hidden="true">錨</div>
     <div class="brandtext">
-      <h1>ANCHOR</h1>
-      <p class="sub">a local AI presenter · chat → kokoro voice → living face</p>
+      <h1>SAKURA</h1>
     </div>
   </div>
 
@@ -45,6 +49,7 @@
       </span>
     </div>
 
+    <button class="iconbtn" id="danceBtn" title="Make her dance" aria-label="Dance"><span aria-hidden="true">✦</span></button>
     <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="themeglyph"></span></button>
     <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="glyph-gear"></span></button>
 
@@ -77,18 +82,14 @@
 
   <section class="panel console">
     <div class="console__head">
-      <div class="meta">
-        <span class="tag">LLM</span><code id="llmId">—</code>
-        <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
-        <span class="tag tag--dev" id="devTag" hidden>—</span>
-      </div>
       <div class="console__actions">
         <button class="btn" id="preload">warm up</button>
-        <button class="btn btn--ghost" id="reset">reset</button>
+        <button class="btn btn--ghost" id="reset">reset chat</button>
       </div>
     </div>
 
-    <div id="chat" class="chat" aria-live="polite"></div>
+    <div id="chat" class="chat"></div>
+    <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
     <div class="composer">
       <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="glyph-mic"></span></button>
@@ -122,17 +123,25 @@
     <div class="set set--grid">
       <div><label class="set__row" for="dtypeSel"><span>Precision</span></label>
         <select id="dtypeSel" class="select select--block">
-          <option value="q8">q8 (small)</option>
-          <option value="q4f16">q4f16</option>
-          <option value="fp16">fp16</option>
-          <option value="fp32">fp32 (best)</option>
+          <option value="q4f16">q4f16 (WebGPU, ~1.4 GB)</option>
+          <option value="q8">q8 (CPU/WASM, ~1.7 GB)</option>
+          <option value="fp16">fp16 (~3.5 GB)</option>
+          <option value="fp32">fp32 (best, ~7 GB)</option>
         </select></div>
       <div><label class="set__row" for="deviceSel"><span>Compute</span></label>
         <select id="deviceSel" class="select select--block">
-          <option value="auto">auto</option>
-          <option value="webgpu">WebGPU</option>
+          <option value="webgpu">WebGPU (recommended)</option>
           <option value="wasm">wasm (CPU)</option>
         </select></div>
+    </div>
+
+    <div class="set">
+      <label class="set__row"><span>Loaded models</span></label>
+      <div class="meta meta--stacked">
+        <span class="tag">LLM</span><code id="llmId">—</code>
+        <span class="tag tag--alt">TTS</span><code id="ttsId">—</code>
+        <span class="tag tag--dev" id="devTag" hidden>—</span>
+      </div>
     </div>
 
     <div class="set set--actions">
@@ -153,6 +162,7 @@
     <div class="modal__bar"><div id="barFill" class="modal__fill" style="--w:0%"></div></div>
     <div class="modal__row"><span id="ovFile">—</span><span id="ovBytes">—</span></div>
     <div class="modal__hint" id="ovHint">First run downloads model weights and caches them in the browser.</div>
+    <button class="btn btn--ghost btn--tiny" id="ovCancel" hidden>cancel download</button>
   </div>
 </div>
 
@@ -161,7 +171,9 @@
 (async () => {
   const selfScript = document.currentScript;
   document.documentElement.setAttribute('data-theme', localStorage.getItem('anchor.theme') || 'dark');
-  let mode = localStorage.getItem('anchor.mode') || 'online';
+  // WEB mode only — the WEB/LOCAL switch is hidden and LOCAL vendoring isn't maintained.
+  let mode = 'online';
+  localStorage.setItem('anchor.mode', 'online');
 
   const CDN = {
     three:'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js',
@@ -169,9 +181,10 @@
     addons:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/',
     basis:'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/',
     vrm:'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.4.5/lib/three-vrm.module.min.js',
+    vrmAnim:'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.4.5/lib/three-vrm-animation.module.min.js',
     face:'./assets/avatar.vrm',
-    transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js',
-    wasm:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/',
+    transformers:'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/transformers.min.js',
+    wasm:'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/',
     kokoro:'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js',
     phonemizer:'https://cdn.jsdelivr.net/npm/phonemizer@1.2.1/dist/phonemizer.js',
     modelBase:null,
@@ -182,6 +195,7 @@
     addons:'./vendor/three/jsm/',
     basis:'./vendor/three/jsm/libs/basis/',
     vrm:'./vendor/three-vrm/three-vrm.module.min.js',
+    vrmAnim:'./vendor/three-vrm/three-vrm-animation.module.min.js',
     face:'./assets/avatar.vrm',
     transformers:'./vendor/transformers/transformers.min.js',
     wasm:new URL('./vendor/transformers/', document.baseURI).href,
@@ -203,7 +217,7 @@
   im.type = 'importmap';
   const map = {
     imports: {
-      'three': A.three, 'three/addons/': A.addons, '@pixiv/three-vrm': A.vrm,
+      'three': A.three, 'three/addons/': A.addons, '@pixiv/three-vrm': A.vrm, '@pixiv/three-vrm-animation': A.vrmAnim,
       '@huggingface/transformers': A.transformers,
       'kokoro-js': A.kokoro, 'phonemizer': A.phonemizer,
       'path': './vendor/stub-empty.js', 'fs/promises': './vendor/stub-empty.js',
@@ -217,7 +231,23 @@
   im.after(app);
 
   if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('./sw.js'); } catch (e) { console.warn('SW register failed', e); }
+    try {
+      const reg = await navigator.serviceWorker.register('./sw.js');
+      // The SW injects COOP/COEP headers so the page becomes crossOriginIsolated.
+      // BUT: (a) on first install the navigation that registered the SW has already
+      // returned without those headers, and (b) Chrome's hard-refresh (Ctrl+Shift+R)
+      // bypasses the SW for the navigation, so the page comes back uninsulated again.
+      // Either way: if we have an active SW but no COI, force a single soft reload
+      // — that one goes through the SW and gets the headers. Guarded by sessionStorage
+      // so we never loop if COI fundamentally can't be reached (e.g. unsupported browser).
+      await navigator.serviceWorker.ready;
+      if (!self.crossOriginIsolated && !sessionStorage.getItem('coi-reload')) {
+        sessionStorage.setItem('coi-reload', '1');
+        location.reload();
+        return;
+      }
+      if (self.crossOriginIsolated) sessionStorage.removeItem('coi-reload');
+    } catch (e) { console.warn('SW register failed', e); }
   }
 })();
 </script>

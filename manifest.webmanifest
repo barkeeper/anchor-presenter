@@ -1,6 +1,6 @@
 {
-  "name": "ANCHOR — local AI presenter",
-  "short_name": "ANCHOR",
+  "name": "SAKURA — local AI presenter",
+  "short_name": "SAKURA",
   "description": "In-browser LLM chat that speaks with Kokoro TTS and a living 3D face. Runs fully on-device.",
   "start_url": "./",
   "scope": "./",
