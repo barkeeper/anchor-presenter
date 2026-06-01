@@ -37,39 +37,52 @@ const FEWSHOT = [
   { role: 'assistant', content: 'Honey never spoils — archaeologists have found pots of it in ancient tombs that are still edible.' },
 ];
 
+const DEFAULT_MODEL = 'gemma-4-e2b';
+const storedModel = localStorage.getItem('anchor.model');
 const settings = {
   voice: localStorage.getItem('anchor.voice') || 'af_heart',
   speed: +(localStorage.getItem('anchor.speed') || 1),
-  model: localStorage.getItem('anchor.model') || '135m',
-  dtype: localStorage.getItem('anchor.dtype') || 'q8',
-  device: (localStorage.getItem('anchor.device') === 'webgpu') ? 'webgpu' : 'wasm',
+  // migrate retired SmolLM2 keys → current default
+  model: (storedModel && LLM_MODELS[storedModel]) ? storedModel : DEFAULT_MODEL,
+  // q4f16 is the WebGPU sweet spot for sub-2B models; q8 falls back automatically on WASM
+  dtype: localStorage.getItem('anchor.dtype') || 'q4f16',
+  // default to WebGPU when nothing's been chosen yet (worker falls back to wasm if unavailable)
+  device: (localStorage.getItem('anchor.device') === 'wasm') ? 'wasm' : 'webgpu',
   muted: localStorage.getItem('anchor.muted') === '1',
 };
+// write the resolved defaults back so the dropdowns stay in sync after a refresh
+localStorage.setItem('anchor.model', settings.model);
+localStorage.setItem('anchor.dtype', settings.dtype);
+localStorage.setItem('anchor.device', settings.device);
 
 // main-thread transformers env (used only by Whisper STT) — worker configures its own
 env.allowLocalModels = CFG.mode === 'offline';
 env.allowRemoteModels = CFG.mode === 'online';
 if (CFG.mode === 'offline') env.localModelPath = A.modelBase;
 env.backends.onnx.wasm.wasmPaths = A.wasm;
+// single-threaded WASM works without SharedArrayBuffer / COOP+COEP — see llm-worker.js
+env.backends.onnx.wasm.numThreads = 1;
+env.backends.onnx.wasm.proxy = false;
 
 // ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   led: $('led'), status: $('status'), banner: $('banner'), llmId: $('llmId'), ttsId: $('ttsId'), devTag: $('devTag'),
   chat: $('chat'), input: $('input'), send: $('send'), stopBtn: $('stopBtn'), micBtn: $('micBtn'), reset: $('reset'), preload: $('preload'),
-  modeSwitch: $('modeSwitch'), themeBtn: $('themeBtn'), settingsBtn: $('settingsBtn'), installBtn: $('installBtn'), muteBtn: $('muteBtn'),
+  modeSwitch: $('modeSwitch'), themeBtn: $('themeBtn'), settingsBtn: $('settingsBtn'), installBtn: $('installBtn'), muteBtn: $('muteBtn'), danceBtn: $('danceBtn'),
   voice: $('voice'), voiceSel: $('voiceSel'), onair: $('onair'), onairTxt: $('onairTxt'), caption: $('caption'),
   faceCanvas: $('face'), faceFallback: $('faceFallback'), wave: $('wave'),
-  overlay: $('overlay'), ring: $('ring'), ovTitle: $('ovTitle'), ovLine: $('ovLine'), ovPct: $('ovPct'), ovFile: $('ovFile'), ovBytes: $('ovBytes'), ovHint: $('ovHint'),
+  overlay: $('overlay'), ring: $('ring'), ovTitle: $('ovTitle'), ovLine: $('ovLine'), ovPct: $('ovPct'), ovFile: $('ovFile'), ovBytes: $('ovBytes'), ovHint: $('ovHint'), ovCancel: $('ovCancel'),
   settingsPanel: $('settingsPanel'), speed: $('speed'), speedVal: $('speedVal'), modelSel: $('modelSel'), dtypeSel: $('dtypeSel'), deviceSel: $('deviceSel'),
-  cacheBtn: $('cacheBtn'), cacheHint: $('cacheHint'), clearBtn: $('clearBtn'),
+  cacheBtn: $('cacheBtn'), cacheHint: $('cacheHint'), clearBtn: $('clearBtn'), srAnnouncer: $('srAnnouncer'),
 };
+const announce = (msg) => { if (el.srAnnouncer) el.srAnnouncer.textContent = msg; };
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 el.ttsId.textContent = 'Kokoro-82M';
 el.modeSwitch.dataset.mode = CFG.mode;
 for (const v of VOICES) for (const sel of [el.voice, el.voiceSel]) { const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; sel.appendChild(o); }
-for (const k in LLM_MODELS) { const o = document.createElement('option'); o.value = k; o.textContent = LLM_MODELS[k].label; el.modelSel.appendChild(o); }
+for (const k in LLM_MODELS) { if (LLM_MODELS[k].fallback) continue; const o = document.createElement('option'); o.value = k; o.textContent = LLM_MODELS[k].label; el.modelSel.appendChild(o); }
 el.voice.value = el.voiceSel.value = settings.voice; el.speed.value = settings.speed; el.speedVal.textContent = settings.speed.toFixed(2) + '×';
 el.modelSel.value = settings.model; el.dtypeSel.value = settings.dtype; el.deviceSel.value = settings.device;
 el.llmId.textContent = LLM_MODELS[settings.model].id.split('/').pop();
@@ -81,26 +94,78 @@ if (CFG.requestedOffline && CFG.offlineMissing) {
 
 // ---------- state ----------
 let busy = false, face = null, recording = false, deferredPrompt = null;
-let pending = null;   // { bubble, userText, first, moodLen }
+let pending = null;   // { bubble, userText, first, moodLen } — LLM generation lifecycle
+let reveal = null;    // { bubble, first, full } — chat bubble revealed in lockstep with speech
 let history = loadHistory();
 
 // ---------- progress overlay ----------
 const fmtBytes = (n) => { if (!Number.isFinite(n) || n <= 0) return '0 B'; const u = ['B', 'KB', 'MB', 'GB']; let i = 0, v = n; while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; } return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`; };
 const fileMap = new Map();
-const overallPct = () => { let l = 0, t = 0; for (const v of fileMap.values()) if (v.total > 0) { l += v.loaded || 0; t += v.total; } return t > 0 ? (l / t) * 100 : 0; };
-const showOverlay = (on) => { el.overlay.classList.toggle('show', !!on); el.overlay.setAttribute('aria-hidden', on ? 'false' : 'true'); };
+const agg = () => { let l = 0, t = 0, n = 0; for (const v of fileMap.values()) { n++; l += v.loaded || 0; if (v.total > 0) t += v.total; } return { l, t, n }; };
+const resetProgress = () => { fileMap.clear(); lastPct = 0; };
+
+// ---- download stall watchdog: if no progress for STALL_MS, tell the user (instead of a
+// frozen-looking overlay) and offer to cancel a stuck download. ----
+const STALL_MS = 20000;
+const OV_HINT_DEFAULT = 'First run downloads model weights and caches them in the browser.';
+let lastProgressAt = 0, stallTimer = null, downloading = false;
+function markProgress() { lastProgressAt = performance.now(); if (downloading) { el.ovHint.textContent = OV_HINT_DEFAULT; el.ovCancel.hidden = true; } }
+function startStallWatch() {
+  downloading = true; markProgress();
+  if (stallTimer) return;
+  stallTimer = setInterval(() => {
+    if (downloading && performance.now() - lastProgressAt > STALL_MS) {
+      el.ovHint.textContent = 'This is taking longer than expected — your connection may be slow or interrupted. It will keep trying.';
+      el.ovCancel.hidden = false;
+    }
+  }, 3000);
+}
+function stopStallWatch() { downloading = false; if (stallTimer) { clearInterval(stallTimer); stallTimer = null; } el.ovCancel.hidden = true; el.ovHint.textContent = OV_HINT_DEFAULT; }
+
+let lastPct = 0, lastPaint = 0;
+const showOverlay = (on) => { el.overlay.classList.toggle('show', !!on); el.overlay.setAttribute('aria-hidden', on ? 'false' : 'true'); if (!on) { stopStallWatch(); lastPct = 0; } };
+// explicit painter — used by the offline-cache flow, which supplies its own numbers
 function setProgress(pct, line, file, loaded, total) {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
   el.ring.style.setProperty('--p', `${p}%`); $('barFill').style.setProperty('--w', `${p}%`); el.ovPct.textContent = `${p}%`;
   if (line) el.ovLine.textContent = line; if (file) el.ovFile.textContent = file;
   el.ovBytes.textContent = (Number.isFinite(loaded) && total > 0) ? `${fmtBytes(loaded)} / ${fmtBytes(total)}` : '—';
 }
+// Throttled, AGGREGATE, MONOTONIC painter for model downloads. The model arrives as many
+// concurrent shards; painting each file's name/bytes on every event made the popup flicker
+// and the % jump backward. Instead show one steady total, repainted at most ~8×/sec.
+function paintProgress(force) {
+  const now = performance.now();
+  if (!force && now - lastPaint < 120) return;
+  lastPaint = now;
+  const { l, t, n } = agg();
+  let pct = t > 0 ? (l / t) * 100 : lastPct;
+  pct = Math.max(lastPct, Math.min(100, pct)); // never jump backward as new shards register
+  lastPct = pct;
+  const p = Math.round(pct);
+  el.ring.style.setProperty('--p', `${p}%`); $('barFill').style.setProperty('--w', `${p}%`); el.ovPct.textContent = `${p}%`;
+  el.ovLine.textContent = 'downloading model weights…';
+  el.ovFile.textContent = `${n} file${n === 1 ? '' : 's'}`;
+  el.ovBytes.textContent = t > 0 ? `${fmtBytes(l)} / ${fmtBytes(t)}` : fmtBytes(l);
+}
 function progress(title, info) {
   const st = info?.status, file = info?.file || '';
-  if (st === 'initiate' || st === 'download') { el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `fetching ${file}`, file); }
-  else if (st === 'progress') { if (file) fileMap.set(file, { loaded: info.loaded, total: info.total }); el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); setLED('busy'); setStatus('downloading'); setProgress(overallPct(), `downloading ${file}`, file, info.loaded, info.total); }
-  else if (st === 'done') { if (file && fileMap.has(file)) { const v = fileMap.get(file); fileMap.set(file, { loaded: v.total ?? v.loaded, total: v.total ?? v.loaded }); } setProgress(overallPct(), `unpacking ${file}`, file); }
-  else if (st === 'ready') { setProgress(100, 'ready', info.model || ''); setTimeout(() => showOverlay(false), 220); }
+  if (st === 'initiate' || st === 'download') {
+    if (file && !fileMap.has(file)) fileMap.set(file, { loaded: 0, total: 0 });
+    el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); startStallWatch(); setLED('busy'); setStatus('downloading'); paintProgress();
+  } else if (st === 'progress') {
+    if (file) fileMap.set(file, { loaded: info.loaded, total: info.total });
+    el.ovTitle.textContent = `loading ${title}…`; showOverlay(true); startStallWatch(); markProgress(); setLED('busy'); setStatus('downloading'); paintProgress();
+  } else if (st === 'done') {
+    markProgress();
+    if (file && fileMap.has(file)) { const v = fileMap.get(file); fileMap.set(file, { loaded: v.total || v.loaded, total: v.total || v.loaded }); }
+    paintProgress(true);
+  } else if (st === 'ready') {
+    stopStallWatch(); lastPct = 100;
+    el.ovPct.textContent = '100%'; el.ring.style.setProperty('--p', '100%'); $('barFill').style.setProperty('--w', '100%');
+    el.ovLine.textContent = 'ready'; el.ovFile.textContent = ''; el.ovBytes.textContent = '';
+    setTimeout(() => showOverlay(false), 220);
+  }
 }
 const makeProgress = (title) => (info) => progress(title, info);   // for stt.js
 
@@ -133,28 +198,91 @@ function restoreChat() {
   if (!history.length) addMsg('system', `Local in-browser presenter · ${CFG.mode.toUpperCase()} mode. Type or hit 🎙 — first run downloads & caches the models.`);
   else for (const m of history) addMsg(m.role, m.content);
 }
-const getMessages = () => [SYSTEM, ...FEWSHOT, ...history.slice(-12)];
+// Keep as many whole recent turns as fit a character budget (a rough token proxy), instead
+// of a blunt fixed window — long chats stay coherent without overflowing the small model.
+const HISTORY_CHAR_BUDGET = 6000;
+function getMessages() {
+  const recent = [];
+  let used = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const len = (history[i].content || '').length + 8; // +8 ≈ role/format overhead per turn
+    if (recent.length && used + len > HISTORY_CHAR_BUDGET) break;
+    recent.unshift(history[i]); used += len;
+  }
+  return [SYSTEM, ...FEWSHOT, ...recent];
+}
 function updateDevTag(device, dtype) { el.devTag.hidden = false; el.devTag.textContent = dtype ? `${device} ${dtype}` : device; }
+function updateLoadedModelHud(modelKey, device) {
+  if (!modelKey || !LLM_MODELS[modelKey]) return;
+  el.llmId.textContent = LLM_MODELS[modelKey].id.split('/').pop();
+  // when the worker had to fall back from the user's selection, show a small notice that
+  // is honest about WHERE it's running (GPU vs CPU) — the 0.6B label says "CPU-friendly"
+  // but it may well be on the GPU.
+  if (modelKey !== settings.model) {
+    const where = device === 'webgpu' ? 'your GPU (WebGPU)' : 'CPU';
+    el.banner.hidden = false;
+    el.banner.innerHTML = `<b>${LLM_MODELS[settings.model].label}</b> didn’t fit; running <b>${LLM_MODELS[modelKey].label}</b> on <b>${where}</b> instead.`;
+  } else {
+    el.banner.hidden = true;   // requested model loaded — clear any prior fallback notice
+  }
+}
 
 // ---------- modules ----------
-const speech = createSpeech({ face: null, onCaption, onState });
+const speech = createSpeech({ face: null, onCaption, onState, onSpoken });
 speech.setMuted(settings.muted);
-const stt = createSTT({ onProgress: makeProgress('speech recognizer') });
+// debug hooks for the sync test (lip-sync / caption / audio vs. chat text)
+window.__diag = {
+  speaking: () => speech.speaking,
+  audioRMS: () => { try { const a = speech.analyser, buf = new Float32Array(a.fftSize); a.getFloatTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]; return Math.sqrt(s / buf.length); } catch { return 0; } },
+  caption: () => ({ text: el.caption.textContent || '', active: el.caption.querySelector('.now')?.textContent || '' }),
+  bubble: () => { const b = [...document.querySelectorAll('.msg.assistant .bubble')].pop(); return b?.textContent || ''; },
+  fullReply: () => reveal?.full || '',
+  dance: () => danceAudio ? { src: danceAudio.src, paused: danceAudio.paused, volume: danceAudio.volume } : null,
+};
+const stt = createSTT({ assets: A, offline: CFG.mode === 'offline', onProgress: makeProgress('speech recognizer') });
 const PROG_TITLE = { llm: 'language model', tts: 'voice model' };
 const inference = createInference({
   assets: A, offline: CFG.mode === 'offline',
   onProgress: (phase, info) => progress(PROG_TITLE[phase] || 'model', info),
-  onLoaded: (device, dtype) => updateDevTag(device, dtype),
-  onToken: (clean) => { if (!pending) return; if (pending.first) { pending.bubble.textContent = ''; pending.first = false; } pending.bubble.textContent = clean; scrollBottom(); if (clean.length - pending.moodLen > 28) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); pending.moodLen = clean.length; } },
+  onLoaded: (device, dtype, modelKey) => { updateDevTag(device, dtype); updateLoadedModelHud(modelKey, device); },
+  onEnv: (e) => { window.__llmEnv = e; console.log(`[llm-worker env] WebGPU adapter: ${e.gpu} · maxStorageBufferBindingSize: ${e.maxStorageBufferMB ?? '?'} MB · crossOriginIsolated: ${e.coi} · SharedArrayBuffer: ${e.sab}`); },
+  onToken: (clean) => {
+    if (!pending) return;
+    // Accumulate the reply but DON'T dump it into the bubble — the bubble is revealed by
+    // onSpoken in sync with the voice (the LLM races far ahead of the TTS otherwise).
+    if (reveal) reveal.full = clean;
+    const grew = clean.length - pending.moodLen;
+    if ((grew > 16 && /[.!?](\s|$)/.test(clean.slice(-2))) || grew > 100) { const m = detectMood(clean); face?.setMood(m.mood, m.intensity); pending.moodLen = clean.length; }
+  },
   onAudio: (chunk) => speech.enqueue(chunk),
-  onSpeechEnd: () => speech.end(),
-  onDone: (reply) => { if (!pending) return; pending.bubble.textContent = reply; history.push({ role: 'assistant', content: reply }); saveHistory(history); const m = detectMood(reply); face?.setMood(m.mood, m.intensity); setStatus('ready'); setLED('ready'); setBusy(false); pending = null; },
-  onError: (errMsg) => { console.error('infer:', errMsg); if (pending) { renderError(pending.bubble, pending.userText, errMsg); pending = null; } else { setStatus('error'); } speech.cancel(); setOnAir('idle'); setLED('err'); setBusy(false); showOverlay(false); },
+  onSpeechEnd: () => { speech.end(); },
+  onDone: (reply) => {
+    if (!pending) return;
+    if (reveal) reveal.full = reply;
+    announce('Anchor said: ' + reply); history.push({ role: 'assistant', content: reply }); saveHistory(history);
+    const m = detectMood(reply); face?.setMood(m.mood, m.intensity);
+    setStatus('ready'); setLED('ready'); setBusy(false); pending = null;
+    // If nothing is being spoken (TTS off/failed), show the full reply now; otherwise let the
+    // speech-synced reveal play out and finalize in onState('idle').
+    if (reveal && !speech.speaking) { reveal.bubble.textContent = reply; reveal = null; }
+  },
+  onError: (errMsg) => { console.error('infer:', errMsg); if (pending) { renderError(pending.bubble, pending.userText, errMsg); pending = null; } else { setStatus('error'); } reveal = null; speech.cancel(); setOnAir('idle'); setLED('err'); setBusy(false); showOverlay(false); },
 });
+
+// Reveal the chat bubble word-by-word as the voice speaks them (keeps text + audio + face in sync).
+function onSpoken(text) {
+  if (!reveal || !text) return;
+  if (reveal.first) { reveal.bubble.textContent = ''; reveal.first = false; }
+  reveal.bubble.textContent = text; scrollBottom();
+}
 
 function onState(state) {
   if (state === 'speaking') { setOnAir('live'); el.stopBtn.hidden = false; }
-  else { setOnAir('idle'); el.stopBtn.hidden = true; el.caption.classList.remove('show'); }
+  else {
+    setOnAir('idle'); el.stopBtn.hidden = true; el.caption.classList.remove('show');
+    // speech finished (or was cancelled) — make sure the full reply is shown.
+    if (reveal) { reveal.bubble.textContent = reveal.full; reveal = null; }
+  }
 }
 function onCaption(text, wi) {
   if (!text) { el.caption.classList.remove('show'); el.caption.innerHTML = ''; return; }
@@ -178,17 +306,19 @@ async function maybeSeedVoices() {
 }
 
 // ---------- the main loop ----------
-function setBusy(on) { busy = !!on; el.send.disabled = busy || !el.input.value.trim(); el.reset.disabled = busy; el.preload.disabled = busy; el.micBtn.disabled = busy; }
+// Note: the mic stays enabled while busy so the user can barge in (interrupt) the avatar.
+function setBusy(on) { busy = !!on; el.send.disabled = busy || !el.input.value.trim(); el.reset.disabled = busy; el.preload.disabled = busy; }
 
 async function sendMessage(raw) {
   const text = (raw ?? '').trim();
   if (!text || busy) return;
-  speech.cancel(); inference.cancel(); setOnAir('idle'); setBusy(true);
+  stopDanceMusic(); speech.cancel(); inference.cancel(); setOnAir('idle'); setBusy(true);
   addMsg('user', text); history.push({ role: 'user', content: text }); saveHistory(history);
   const bubble = addMsg('assistant', typingNode());
   setOnAir('think'); setStatus('thinking'); setLED('busy');
   pending = { bubble, userText: text, first: true, moodLen: 0 };
-  fileMap.clear();
+  reveal = { bubble, first: true, full: '' };
+  resetProgress();
   await maybeSeedVoices();
   await inference.ready;
   speech.begin();
@@ -211,29 +341,58 @@ function drawWave() {
   waveCtx.globalAlpha = 1;
 }
 
-// ---------- voice input ----------
-async function micToggle() {
-  if (busy) return;
-  if (!recording) {
-    try { await stt.ensure(); } catch (e) { console.error(e); setStatus('stt error'); return; }
-    try { await stt.startRecording(); recording = true; el.micBtn.classList.add('rec'); setStatus('listening'); setLED('busy'); }
-    catch (e) { console.error(e); el.banner.hidden = false; el.banner.textContent = 'Microphone access denied or unavailable.'; }
-  } else {
-    recording = false; el.micBtn.classList.remove('rec'); setStatus('transcribing'); setLED('busy');
-    try { const t = await stt.stopAndTranscribe(); setStatus('ready'); setLED('ready'); if (t) sendMessage(t); }
-    catch (e) { console.error(e); setStatus('stt error'); setLED('err'); }
+// ---------- voice input (hold-to-talk + click-to-toggle + barge-in) ----------
+// micState: 'idle' → 'starting' (async getUserMedia/model) → 'on' → back to 'idle'.
+// releaseWanted handles a hold that's released before recording has finished starting.
+let micState = 'idle', releaseWanted = false, micPressAt = 0;
+
+async function micStart() {
+  if (micState !== 'idle') return;
+  // barge-in: cut off whatever the avatar is currently generating/saying.
+  stopDanceMusic(); speech.cancel(); inference.cancel(); setOnAir('idle'); pending = null; setBusy(false);
+  micState = 'starting'; releaseWanted = false;
+  try { stt.ensure(); await stt.startRecording(); }
+  catch (e) {
+    console.error(e); micState = 'idle'; el.micBtn.classList.remove('rec');
+    el.banner.hidden = false; el.banner.textContent = 'Microphone unavailable or permission denied.';
+    setStatus('idle'); setLED(''); return;
   }
+  micState = 'on'; recording = true; el.micBtn.classList.add('rec'); setStatus('listening'); setLED('busy');
+  if (releaseWanted) micStop();                 // released during 'starting' → stop now
 }
+async function micStop() {
+  if (micState === 'starting') { releaseWanted = true; return; }
+  if (micState !== 'on') return;
+  micState = 'idle'; recording = false; el.micBtn.classList.remove('rec'); setStatus('transcribing'); setLED('busy');
+  try {
+    const t = await stt.stopAndTranscribe();
+    if (t) { setStatus('ready'); setLED('ready'); sendMessage(t); }
+    else { setStatus('idle'); setLED(''); }     // empty/non-speech/hallucination → quietly ignore
+  } catch (e) { console.error(e); setStatus('stt error'); setLED('err'); }
+}
+// A press while recording stops it (toggle off). Otherwise start; on release, a long
+// hold ends it (push-to-talk) while a quick tap leaves it on (click-to-toggle).
+function micPressStart() { if (micState === 'on' || micState === 'starting') { micPressAt = 0; micStop(); return; } micPressAt = performance.now(); micStart(); }
+function micPressEnd() { if (!micPressAt) return; const held = performance.now() - micPressAt; micPressAt = 0; if (held >= 400) micStop(); /* else: quick tap → stays on as a toggle */ }
 
 // ---------- offline caching (service worker) ----------
 function llmFileList() {
-  const id = LLM_MODELS[settings.model].id, base = `https://huggingface.co/${id}/resolve/main/`;
-  return ['config.json', 'generation_config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt', `onnx/${DTYPE_FILE[settings.dtype] || DTYPE_FILE.q8}`].map((f) => base + f);
+  const files = ['config.json', 'generation_config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'vocab.json', 'merges.txt'];
+  const out = [];
+  for (const key of Object.keys(LLM_MODELS)) {
+    const id = LLM_MODELS[key].id, base = `https://huggingface.co/${id}/resolve/main/`;
+    // small model gets q8 (the WASM-safe fallback); user-selected model gets their dtype
+    const dtypeFile = (key === settings.model) ? (DTYPE_FILE[settings.dtype] || DTYPE_FILE.q8) : DTYPE_FILE.q8;
+    out.push(...files.map((f) => base + f), base + 'onnx/' + dtypeFile);
+  }
+  return out;
 }
-function buildPrecacheList() {
-  const shell = ['./', './index.html', './app.js', './face.js', './speech.js', './infer.js', './llm-worker.js', './tts-worker.js', './stt.js', './emotion.js', './persist.js', './styles.css', './manifest.webmanifest', './vendor/stub-empty.js', './assets/avatar.vrm'];
+async function buildPrecacheList() {
+  // app-shell list is shared with the service worker via shell-files.json (single source).
+  let shell = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest'];
+  try { const r = await fetch('./shell-files.json', { cache: 'no-store' }); if (r.ok) shell = await r.json(); } catch {}
   const core = CFG.mode === 'online' ? 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js' : './vendor/three/build/three.core.js';
-  const libs = [A.three, core, A.vrm, A.transformers, A.kokoro, A.phonemizer, A.face,
+  const libs = [A.three, core, A.vrm, A.vrmAnim, A.transformers, A.kokoro, A.phonemizer, A.face,
     A.addons + 'environments/RoomEnvironment.js', A.addons + 'loaders/GLTFLoader.js', A.addons + 'loaders/KTX2Loader.js',
     A.addons + 'libs/ktx-parse.module.js', A.addons + 'libs/zstddec.module.js', A.addons + 'libs/meshopt_decoder.module.js',
     A.addons + 'math/ColorSpaces.js', A.addons + 'utils/BufferGeometryUtils.js', A.addons + 'utils/WorkerPool.js',
@@ -246,7 +405,7 @@ async function cacheForOffline() {
   el.cacheBtn.disabled = true;
   try {
     const reg = await navigator.serviceWorker.ready;
-    const urls = buildPrecacheList();
+    const urls = await buildPrecacheList();
     fileMap.clear(); showOverlay(true); el.ovTitle.textContent = 'caching for offline…'; el.ovHint.textContent = 'Downloading libraries + current models into the browser cache.'; setProgress(0, 'starting', `${urls.length} files`);
     const onMsg = (e) => {
       const d = e.data || {};
@@ -273,10 +432,17 @@ const openSettings = (on) => { el.settingsPanel.classList.toggle('open', on); el
 el.input.addEventListener('input', () => { el.send.disabled = busy || !el.input.value.trim(); });
 el.input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); } });
 el.send.addEventListener('click', () => { const t = el.input.value; el.input.value = ''; el.send.disabled = true; sendMessage(t); });
-el.stopBtn.addEventListener('click', () => { speech.cancel(); inference.cancel(); setOnAir('idle'); });
-el.micBtn.addEventListener('click', micToggle);
-el.preload.addEventListener('click', async () => { if (busy) return; fileMap.clear(); await inference.ready; inference.load({ opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device }, ttsId: TTS_ID }); });
-el.reset.addEventListener('click', () => { if (busy) return; speech.cancel(); inference.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
+el.stopBtn.addEventListener('click', () => { stopDanceMusic(); speech.cancel(); inference.cancel(); setOnAir('idle'); });
+el.micBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); micPressStart(); });
+el.micBtn.addEventListener('pointerup', (e) => { e.preventDefault(); micPressEnd(); });
+el.micBtn.addEventListener('pointerleave', () => { if (micPressAt) micPressEnd(); });
+el.micBtn.addEventListener('pointercancel', () => { if (micPressAt) micPressEnd(); });
+// Spacebar = pure push-to-talk (hold to speak), but only when not typing in the composer.
+let spaceHeld = false;
+window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !spaceHeld && !e.repeat && document.activeElement !== el.input) { spaceHeld = true; e.preventDefault(); micStart(); } });
+window.addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceHeld) { spaceHeld = false; e.preventDefault(); micStop(); } });
+el.preload.addEventListener('click', async () => { if (busy) return; resetProgress(); await inference.ready; inference.load({ opts: { modelKey: settings.model, dtype: settings.dtype, device: settings.device }, ttsId: TTS_ID }); });
+el.reset.addEventListener('click', () => { if (busy) return; stopDanceMusic(); speech.cancel(); inference.cancel(); setOnAir('idle'); history = []; clearHistory(); restoreChat(); el.send.disabled = !el.input.value.trim(); });
 
 const setVoice = (v) => { settings.voice = v; localStorage.setItem('anchor.voice', v); el.voice.value = v; el.voiceSel.value = v; };
 el.voice.addEventListener('change', () => setVoice(el.voice.value));
@@ -290,6 +456,30 @@ el.clearBtn.addEventListener('click', () => { history = []; clearHistory(); rest
 
 el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; speech.setMuted(settings.muted); localStorage.setItem('anchor.muted', settings.muted ? '1' : '0'); el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0'; });
 el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0';
+// ---------- dance + music (✦ button) ----------
+// Each rare dance has a matching track in ./music/<ClipName>.mp3. Pressing ✦ plays a dance
+// AND its song together; the music plays only on this button (not the idle auto-dances).
+const DANCE_MUSIC_DELAY_MS = 1200; // let the dance get moving before the track kicks in
+const DANCE_MUSIC_VOLUME = 0.6;    // 60%
+let danceAudio = null, danceTimer = null;
+function stopDanceMusic() {
+  if (danceTimer) { clearTimeout(danceTimer); danceTimer = null; }
+  if (danceAudio) { try { danceAudio.pause(); danceAudio.src = ''; } catch {} danceAudio = null; }
+}
+function playDance() {
+  const clip = face?.playRare?.();   // returns the clip name, e.g. "BabyYou", or null
+  if (!clip) { el.banner.hidden = false; el.banner.textContent = 'Dance clips are still loading or unavailable.'; return; }
+  stopDanceMusic();
+  speech.cancel();                   // don't let the song overlap the avatar's voice
+  danceTimer = setTimeout(() => {
+    danceTimer = null;
+    danceAudio = new Audio(`./music/${encodeURIComponent(clip)}.mp3`);
+    danceAudio.volume = DANCE_MUSIC_VOLUME;
+    danceAudio.play().catch((e) => console.warn('dance music failed:', e?.message || e));
+  }, DANCE_MUSIC_DELAY_MS);
+}
+el.danceBtn.addEventListener('click', playDance);
+el.ovCancel.addEventListener('click', () => { inference.reset(); showOverlay(false); speech.cancel(); setOnAir('idle'); pending = null; setBusy(false); setStatus('idle'); setLED(''); el.banner.hidden = false; el.banner.textContent = 'Download canceled. Press send to try again.'; });
 el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('anchor.theme', n); });
 el.settingsBtn.addEventListener('click', () => openSettings(!el.settingsPanel.classList.contains('open')));
 el.settingsPanel.querySelectorAll('[data-close]').forEach((n) => n.addEventListener('click', () => openSettings(false)));
@@ -301,6 +491,31 @@ el.installBtn.addEventListener('click', async () => { if (deferredPrompt) { defe
 window.addEventListener('resize', () => face?.resize());
 el.faceCanvas.addEventListener('pointermove', (e) => { const r = el.faceCanvas.getBoundingClientRect(); face?.setGazeTarget(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1)); });
 el.faceCanvas.addEventListener('pointerleave', () => face?.setGazeTarget(0, 0));
+
+// ---------- environment probe ----------
+// Qwen3 uses GroupQueryAttention which transformers.js v3.x can only run on WebGPU.
+// We pre-flight WebGPU on the main thread (where it's reliably exposed) and warn the
+// user if WebGPU truly isn't available — otherwise the LLM worker would just abort
+// later with the cryptic "Aborted()" message.
+(async () => {
+  const coi = self.crossOriginIsolated;
+  let gpuOk = false, gpuReason = '';
+  if (!navigator.gpu) { gpuReason = 'navigator.gpu missing — needs Chrome/Edge 113+, Firefox 141+, or Safari 26+'; }
+  else {
+    try { const a = await navigator.gpu.requestAdapter(); gpuOk = !!a; if (!a) gpuReason = 'requestAdapter() returned null — GPU may be disabled (chrome://gpu) or in a denylist'; }
+    catch (e) { gpuReason = 'requestAdapter() threw: ' + (e?.message || e); }
+  }
+  if (settings.device === 'webgpu' && !gpuOk) {
+    el.banner.hidden = false;
+    el.banner.innerHTML = `WebGPU isn't available on this device, so <b>${LLM_MODELS[settings.model].label}</b> can't run on the GPU. Falling back to the small CPU model (<b>${LLM_MODELS['qwen3-0.6b'].label}</b>) — chat & voice still work, just smaller and slower. <br><small>Reason: ${gpuReason}.</small>`;
+  } else if (!coi) {
+    // The auto-reload in index.html should have caught this on first navigation. If
+    // we're still here without COI, headers genuinely aren't applying — most likely
+    // the SW is being bypassed (some extensions / DevTools "Bypass for network").
+    el.banner.hidden = false;
+    el.banner.innerHTML = `Page isn't cross-origin isolated, so the LLM can't use SharedArrayBuffer. <br><small>Try: close this tab and open it again (don't hard-refresh — Chrome bypasses the service worker on Ctrl+Shift+R). If DevTools is open, uncheck <b>Application → Service Workers → Bypass for network</b>.</small>`;
+  }
+})();
 
 // ---------- boot ----------
 restoreChat(); setStatus('idle'); setLED(''); setBusy(false); el.input.focus(); drawWave(); maybeSeedVoices();
