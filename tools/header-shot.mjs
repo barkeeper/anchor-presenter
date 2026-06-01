@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const url = process.argv[2] || 'http://127.0.0.1:5173/index.html';
+const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1340, height: 200 } });
+const errs = [];
+p.on('pageerror', (e) => errs.push(e.message));
+p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 160)); });
+await p.goto(url, { waitUntil: 'load' });
+await p.waitForFunction(() => document.querySelectorAll('#voice option').length > 0, undefined, { timeout: 60000 });
+await p.waitForTimeout(500);
+await p.locator('header.bar').screenshot({ path: 'tools/_header.png' });
+console.log(JSON.stringify({ brand: await p.locator('.brand').innerText(), faceUp: await p.evaluate(() => !!window.__face), errors: errs }));
+await b.close();
