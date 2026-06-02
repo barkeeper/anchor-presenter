@@ -79,6 +79,13 @@ const el = {
 const announce = (msg) => { if (el.srAnnouncer) el.srAnnouncer.textContent = msg; };
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Auto-dismiss the notice banner ~15s after it's shown (or its text last changed), so a
+// transient warning like "Download canceled…" doesn't stick around. Watching the element
+// means every place that shows the banner gets this for free.
+let bannerTimer = null;
+const armBannerAutoHide = () => { clearTimeout(bannerTimer); if (!el.banner.hidden) bannerTimer = setTimeout(() => { el.banner.hidden = true; }, 15000); };
+new MutationObserver(armBannerAutoHide).observe(el.banner, { attributes: true, attributeFilter: ['hidden'], childList: true, characterData: true, subtree: true });
+
 el.ttsId.textContent = 'Kokoro-82M';
 el.modeSwitch.dataset.mode = CFG.mode;
 for (const v of VOICES) for (const sel of [el.voice, el.voiceSel]) { const o = document.createElement('option'); o.value = v.id; o.textContent = v.label; sel.appendChild(o); }
@@ -96,6 +103,7 @@ if (CFG.requestedOffline && CFG.offlineMissing) {
 let busy = false, face = null, recording = false, deferredPrompt = null;
 let pending = null;   // { bubble, userText, first, moodLen } — LLM generation lifecycle
 let reveal = null;    // { bubble, first, full } — chat bubble revealed in lockstep with speech
+let danceAudio = null, danceTimer = null;   // dance music player (declared early — applyMute uses it)
 let history = loadHistory();
 
 // ---------- progress overlay ----------
@@ -237,7 +245,8 @@ window.__diag = {
   caption: () => ({ text: el.caption.textContent || '', active: el.caption.querySelector('.now')?.textContent || '' }),
   bubble: () => { const b = [...document.querySelectorAll('.msg.assistant .bubble')].pop(); return b?.textContent || ''; },
   fullReply: () => reveal?.full || '',
-  dance: () => danceAudio ? { src: danceAudio.src, paused: danceAudio.paused, volume: danceAudio.volume } : null,
+  dance: () => danceAudio ? { src: danceAudio.src, paused: danceAudio.paused, volume: danceAudio.volume, muted: danceAudio.muted } : null,
+  muted: () => settings.muted,
 };
 const stt = createSTT({ assets: A, offline: CFG.mode === 'offline', onProgress: makeProgress('speech recognizer') });
 const PROG_TITLE = { llm: 'language model', tts: 'voice model' };
@@ -245,7 +254,7 @@ const inference = createInference({
   assets: A, offline: CFG.mode === 'offline',
   onProgress: (phase, info) => progress(PROG_TITLE[phase] || 'model', info),
   onLoaded: (device, dtype, modelKey) => { updateDevTag(device, dtype); updateLoadedModelHud(modelKey, device); },
-  onEnv: (e) => { window.__llmEnv = e; console.log(`[llm-worker env] WebGPU adapter: ${e.gpu} · maxStorageBufferBindingSize: ${e.maxStorageBufferMB ?? '?'} MB · crossOriginIsolated: ${e.coi} · SharedArrayBuffer: ${e.sab}`); },
+  onEnv: (e) => { window.__llmEnv = e; },   // env details available via window.__llmEnv (no console noise)
   onToken: (clean) => {
     if (!pending) return;
     // Accumulate the reply but DON'T dump it into the bubble — the bubble is revealed by
@@ -398,7 +407,7 @@ async function buildPrecacheList() {
     A.addons + 'math/ColorSpaces.js', A.addons + 'utils/BufferGeometryUtils.js', A.addons + 'utils/WorkerPool.js',
     A.basis + 'basis_transcoder.js', A.basis + 'basis_transcoder.wasm', A.wasm + 'ort-wasm-simd-threaded.jsep.wasm', A.wasm + 'ort-wasm-simd-threaded.jsep.mjs'];
   const tts = ['config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/model_quantized.onnx', ...VOICES.map((v) => `voices/${v.id}.bin`)].map((f) => `https://huggingface.co/${TTS_ID}/resolve/main/${f}`);
-  const whisper = ['config.json', 'generation_config.json', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/encoder_model_quantized.onnx', 'onnx/decoder_model_merged_quantized.onnx'].map((f) => `https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/${f}`);
+  const whisper = ['config.json', 'generation_config.json', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json', 'onnx/encoder_model.onnx', 'onnx/decoder_model_merged.onnx'].map((f) => `https://huggingface.co/onnx-community/whisper-tiny.en/resolve/main/${f}`);
   return [...shell, ...libs, ...llmFileList(), ...tts, ...whisper].filter((u, i, a) => u && a.indexOf(u) === i);
 }
 async function cacheForOffline() {
@@ -454,14 +463,19 @@ el.deviceSel.addEventListener('change', () => { settings.device = el.deviceSel.v
 el.cacheBtn.addEventListener('click', cacheForOffline);
 el.clearBtn.addEventListener('click', () => { history = []; clearHistory(); restoreChat(); });
 
-el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; speech.setMuted(settings.muted); localStorage.setItem('anchor.muted', settings.muted ? '1' : '0'); el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0'; });
-el.muteBtn.querySelector('.muteglyph').dataset.muted = settings.muted ? '1' : '0';
+// Mute applies to BOTH the presenter voice and the dance music, and swaps the speaker icon.
+function applyMute() {
+  speech.setMuted(settings.muted);
+  if (danceAudio) danceAudio.muted = settings.muted;
+  el.muteBtn.querySelector('.muteglyph').textContent = settings.muted ? 'volume_off' : 'volume_up';
+}
+el.muteBtn.addEventListener('click', () => { settings.muted = !settings.muted; localStorage.setItem('anchor.muted', settings.muted ? '1' : '0'); applyMute(); });
+applyMute();
 // ---------- dance + music (✦ button) ----------
 // Each rare dance has a matching track in ./music/<ClipName>.mp3. Pressing ✦ plays a dance
 // AND its song together; the music plays only on this button (not the idle auto-dances).
 const DANCE_MUSIC_DELAY_MS = 1200; // let the dance get moving before the track kicks in
 const DANCE_MUSIC_VOLUME = 0.6;    // 60%
-let danceAudio = null, danceTimer = null;
 function stopDanceMusic() {
   if (danceTimer) { clearTimeout(danceTimer); danceTimer = null; }
   if (danceAudio) { try { danceAudio.pause(); danceAudio.src = ''; } catch {} danceAudio = null; }
@@ -475,12 +489,15 @@ function playDance() {
     danceTimer = null;
     danceAudio = new Audio(`./music/${encodeURIComponent(clip)}.mp3`);
     danceAudio.volume = DANCE_MUSIC_VOLUME;
+    danceAudio.muted = settings.muted;   // respect the mute toggle
     danceAudio.play().catch((e) => console.warn('dance music failed:', e?.message || e));
   }, DANCE_MUSIC_DELAY_MS);
 }
 el.danceBtn.addEventListener('click', playDance);
 el.ovCancel.addEventListener('click', () => { inference.reset(); showOverlay(false); speech.cancel(); setOnAir('idle'); pending = null; setBusy(false); setStatus('idle'); setLED(''); el.banner.hidden = false; el.banner.textContent = 'Download canceled. Press send to try again.'; });
-el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('anchor.theme', n); });
+const updateThemeIcon = () => { el.themeBtn.querySelector('.material-symbols-outlined').textContent = document.documentElement.getAttribute('data-theme') === 'light' ? 'light_mode' : 'dark_mode'; };
+el.themeBtn.addEventListener('click', () => { const n = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', n); localStorage.setItem('anchor.theme', n); updateThemeIcon(); });
+updateThemeIcon();
 el.settingsBtn.addEventListener('click', () => openSettings(!el.settingsPanel.classList.contains('open')));
 el.settingsPanel.querySelectorAll('[data-close]').forEach((n) => n.addEventListener('click', () => openSettings(false)));
 el.modeSwitch.addEventListener('click', () => switchMode(CFG.mode === 'online' ? 'offline' : 'online'));
