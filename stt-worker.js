@@ -20,7 +20,10 @@ async function init(d) {
 const TRANSIENT = /Failed to fetch|NetworkError|net::|ERR_|ECONN|ETIMEDOUT|timeout|timed out|\b(429|500|502|503|504)\b/i;
 async function loadAsr(model) {
   for (let i = 0; i < 2; i++) {
-    try { return await tf.pipeline('automatic-speech-recognition', model, { dtype: 'q8', device: 'wasm', progress_callback: (info) => post({ type: 'progress', info }) }); }
+    // fp32 (not q8): whisper-tiny.en's q8 export uses MatMulNBits with a missing scale that
+    // ONNX Runtime 1.26 (transformers.js 4.x) rejects with "Missing required scale". fp32 has
+    // no integer dequantization, so it loads cleanly on the wasm CPU backend.
+    try { return await tf.pipeline('automatic-speech-recognition', model, { dtype: 'fp32', device: 'wasm', progress_callback: (info) => post({ type: 'progress', info }) }); }
     catch (e) { if (i === 1 || !TRANSIENT.test(String(e?.message || e))) throw e; await new Promise((r) => setTimeout(r, 800 * (i + 1))); }
   }
 }

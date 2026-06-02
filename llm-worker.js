@@ -51,7 +51,7 @@ async function init(d) {
   let gpu = 'no navigator.gpu in worker', maxBuf = 0;
   try {
     if (self.navigator?.gpu) {
-      const a = await self.navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      const a = await self.navigator.gpu.requestAdapter(); // no powerPreference — it's ignored on Windows and just warns
       workerGpuOk = !!a;
       gpu = a ? 'adapter OK' : 'requestAdapter() returned null';
       if (a) {
