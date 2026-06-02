@@ -222,6 +222,37 @@ track on the ✦ button only (idle auto-dances stay silent). Music stops on new 
 reset / mic. SW SWR now caches `mp3|svg`; tracks added to `shell-files.json`. Verified with
 `tools/dance-music-probe.mjs`: clip==track, playing, for all clips.
 
+## Polish + bug-fix pass (2026-06-02, later)
+
+Working on the real GPU (Gemma-4 on WebGPU) surfaced issues the no-GPU box can't:
+- **Model reload-per-prompt** — was a perception of the fallback ladder re-walking when nothing
+  loaded; the `infer.js` dedup (loadedRung/activeKey) is correct (verified reuse on 2nd prompt).
+- **Avatar froze (eyes closed, mouth open) on the first prompt** — the render loop scheduled
+  rAF at the END, so one thrown frame (GPU/context hiccup while Gemma-4 hammers the shared GPU)
+  killed it permanently. Fixed: `face.js` schedules the next frame FIRST and wraps the body in
+  try/catch → self-recovers. (LLM-on-GPU vs face-on-GPU contention is inherent; it may stutter
+  but no longer freezes.)
+- **Dance button played an idle instead of the dance** — the previous idle clip crossfades out
+  and its LoopOnce action fires `finished` mid-fade, re-queuing an idle that overrode the dance
+  ~1s later. Fixed: `playRare` clears `queuedClip`, and the `finished` handler ignores events
+  whose `action !== currentAction`. Verified all 5 dances hold.
+- **Mute** — the speaker button's clicks were being swallowed by the invisible
+  `.viewport__fallback` overlay (`display:grid` overrode its `hidden` attr). Fixed with a global
+  `[hidden]{display:none!important}`. Mute now covers voice + dance music + icon swap.
+- **Text ↔ voice sync** — `speech.js` reveals each sentence's text the moment the voice begins
+  it (clip-onset), so the bubble no longer trails the voice; mouth openness is amplitude-gated
+  so it fully closes on silence.
+- **STT broke on ORT 1.26** — whisper-tiny.en's q8 export uses MatMulNBits with a missing scale
+  that ORT 1.26 rejects. Switched STT to `fp32` (`stt-worker.js`), verified it loads.
+- **Dance music** — renamed user mp3s to `<Clip>.mp3` (verified pairings via decoded original
+  Japanese names), normalized all to −16 LUFS (ffmpeg loudnorm), start ~1.2s after the dance,
+  60% volume, muteable.
+- **UI/console** — all icons → Material Symbols (dance = `nightlife`); notice banner auto-hides
+  after 15s; Send button text white (dark) / black (light). Cleaned console warnings at source:
+  PMREM blur 0.5→0.04, `removeUnnecessaryJoints`→`combineSkeletons`, patched the 5 rare VRMA with
+  `specVersion: "1.0"`, dropped the ignored `powerPreference` and the debug logs. Remaining
+  console noise is browser-extension (`content.js`) + the PWA deferred-install info — not app code.
+
 ## Architecture
 
 ```

@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const url = process.argv[2] || 'http://127.0.0.1:5173/index.html';
+const b = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1340, height: 820 } });
+await p.goto(url, { waitUntil: 'load' });
+await p.waitForFunction(() => document.querySelectorAll('#voice option').length > 0, undefined, { timeout: 60000 });
+await p.waitForTimeout(800);
+await p.locator('#muteBtn').screenshot({ path: 'tools/_mutebtn.png' });
+console.log('saved');
+await b.close();
