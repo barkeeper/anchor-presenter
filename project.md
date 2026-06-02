@@ -253,6 +253,21 @@ Working on the real GPU (Gemma-4 on WebGPU) surfaced issues the no-GPU box can't
   `specVersion: "1.0"`, dropped the ignored `powerPreference` and the debug logs. Remaining
   console noise is browser-extension (`content.js`) + the PWA deferred-install info — not app code.
 
+## Deployment (GitHub Pages)
+
+Live at **https://barkeeper.github.io/anchor-presenter/** — repo `barkeeper/anchor-presenter`,
+Pages builds from **`main`** branch, root path. This local repo (`llmtest`) is the source;
+remote `origin` → that repo. Local branch is `master`, deployed via `git push origin master:main`
+(histories diverged from the old single-file demo, so the first push was `--force`).
+
+To redeploy after committing: `git push origin master:main` (no longer needs --force now they share
+history). Pages auto-rebuilds (~1 min). It serves static files only — **COOP/COEP can't be set by
+Pages**, so cross-origin isolation comes from `sw.js`'s `withCOI()` header injection + the one-time
+soft-reload in index.html. Verified on the live site: `crossOriginIsolated: true`, SAB available,
+boots clean. Models/libs load from jsdelivr + HuggingFace at runtime (not in the repo). `.nojekyll`
+keeps Pages from processing files. Don't bump the SW cache version casually — it wipes the cached
+multi-GB models.
+
 ## Architecture
 
 ```
