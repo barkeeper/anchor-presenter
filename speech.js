@@ -72,12 +72,13 @@ export function createSpeech({ face, onCaption, onState, onSpoken }) {
       if (clip.text !== s.lastCaptionText || wi !== s.lastCaption) { s.lastCaptionText = clip.text; s.lastCaption = wi; onCaption?.(clip.text, wi); }
     } else { face?.setViseme('sil'); }
 
-    // Cumulative spoken text (finished clips in full + the current clip up to the spoken word),
-    // so the chat bubble can reveal in lockstep with the voice instead of racing ahead of it.
+    // Reveal each sentence's text the moment the voice BEGINS speaking it (clips are scheduled
+    // gaplessly, so only the current + already-spoken clips have started). This tracks the
+    // voice at sentence granularity — never trailing behind it — without depending on accurate
+    // per-word clip timing (which can drift after a TTS change).
     let spoken = '';
     for (const c of s.clips) {
-      if (t >= c.end) spoken += (spoken ? ' ' : '') + c.text;
-      else if (t >= c.start) { const wi = Math.min(c.words.length, Math.floor(((t - c.start) / c.dur) * c.words.length) + 1); spoken += (spoken ? ' ' : '') + c.words.slice(0, wi).join(' '); break; }
+      if (t >= c.start) spoken += (spoken ? ' ' : '') + c.text;
       else break;
     }
     if (spoken !== s.lastSpoken) { s.lastSpoken = spoken; onSpoken?.(spoken); }

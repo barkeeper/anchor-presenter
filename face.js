@@ -66,7 +66,7 @@ export async function createFace({ canvas, modelUrl }) {
   scene.add(camera);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.5).texture;
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; // small blur — 0.5 exceeds the 20-sample cap and warns
   const key = new THREE.DirectionalLight(0xfff4e6, 2.2); key.position.set(1.4, 2.2, 2.4); scene.add(key);
   const rim = new THREE.DirectionalLight(0xbfe3ff, 1.0); rim.position.set(-1.8, 1.2, -1.6); scene.add(rim);
   scene.add(new THREE.AmbientLight(0xffffff, 0.35));
@@ -80,7 +80,7 @@ export async function createFace({ canvas, modelUrl }) {
   const gltf = await loader.loadAsync(modelUrl);
   const vrm = gltf.userData.vrm;
   try { VRMUtils.removeUnnecessaryVertices?.(gltf.scene); } catch {}
-  try { VRMUtils.removeUnnecessaryJoints?.(gltf.scene); } catch {}
+  try { (VRMUtils.combineSkeletons || VRMUtils.removeUnnecessaryJoints)?.(gltf.scene); } catch {} // combineSkeletons replaces the deprecated removeUnnecessaryJoints
   try { VRMUtils.rotateVRM0?.(vrm); } catch {}                 // normalize VRM0 to face -Z like VRM1
   vrm.scene.traverse((o) => { o.frustumCulled = false; });
   vrm.scene.rotation.y = Math.PI;                              // turn to face the camera (+Z)
@@ -177,7 +177,11 @@ export async function createFace({ canvas, modelUrl }) {
   let nextQueuedAt = 0;
   let queuedClip = null;
   let nextRareAt = performance.now() + RARE_MIN_GAP_MS + Math.random() * (RARE_MAX_GAP_MS - RARE_MIN_GAP_MS);
-  mixer.addEventListener('finished', () => {
+  mixer.addEventListener('finished', (e) => {
+    // Only react when the CURRENTLY-active clip ends. A manually-triggered dance crossfades
+    // out the previous idle, whose LoopOnce action may then fire 'finished' mid-fade — without
+    // this guard it would queue an idle that overrides the dance ~1s later.
+    if (e.action !== currentAction) return;
     const now = performance.now();
     let pick;
     if (rareClips.length && now >= nextRareAt) {
@@ -206,7 +210,7 @@ export async function createFace({ canvas, modelUrl }) {
         currentClip: currentAction?.getClip()?.name || null,
         idleCount: idleClips.length,
       }),
-      playRare: () => { if (!rareClips.length) return 'no rare clip loaded'; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return `playing: ${c.name || '(unnamed)'}`; },
+      playRare: () => { if (!rareClips.length) return 'no rare clip loaded'; queuedClip = null; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return `playing: ${c.name || '(unnamed)'}`; },
       // debug: current mouth expression weights, so a test can verify lip-sync is driving them.
       sampleMouth: () => { const o = {}; for (const m of MOUTH) o[m] = +((expr?.getValue?.(m)) ?? 0).toFixed(3); return o; },
       // debug: sample a few humanoid bone rotations so a test can detect whether a clip
@@ -239,6 +243,8 @@ export async function createFace({ canvas, modelUrl }) {
 
   function frame() {
     if (!running) return;
+    requestAnimationFrame(frame); // schedule the next frame FIRST so a thrown body can't kill the loop
+    try {
     const dt = Math.min(clock.getDelta(), 0.05);
     const now = performance.now();
 
@@ -288,7 +294,9 @@ export async function createFace({ canvas, modelUrl }) {
     vrm.update(dt);   // bone updates, expressions, lookAt, spring physics
 
     renderer.render(scene, camera);
-    requestAnimationFrame(frame);
+    } catch (e) { // a transient GPU/context hiccup (e.g. under heavy LLM-on-GPU load) must not freeze the avatar
+      if (!frame._warned) { frame._warned = true; console.warn('[face] frame error (recovering):', e?.message || e); }
+    }
   }
   requestAnimationFrame(frame);
 
@@ -305,7 +313,7 @@ export async function createFace({ canvas, modelUrl }) {
     setSpeaking(on) { speaking = !!on; if (!on) { level = 0; openS = 0; visTarget = {}; visCur = {}; } },
     // trigger a showstopper dance on demand (UI button); returns the clip name (e.g. "BabyYou")
     // so the caller can play the matching music, or null if no rare clips are loaded.
-    playRare() { if (!rareClips.length) return null; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return c.name || null; },
+    playRare() { if (!rareClips.length) return null; queuedClip = null; const c = nextRareClip(); playClip(c, { fade: 0.4 }); return c.name || null; },
     hasRare() { return rareClips.length > 0; },
     resize,
     dispose() { running = false; try { mixer.stopAllAction(); } catch {} try { VRMUtils.deepDispose?.(vrm.scene); } catch {} renderer.dispose(); },
