@@ -14,7 +14,7 @@
     manifest-src 'self';
     base-uri 'self';
   " />
-  <title>SAKURA — local AI presenter</title>
+  <title>SAKURA - Chat with a local AI model</title>
   <meta name="theme-color" content="#0a0b0d" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
@@ -27,6 +27,7 @@
   <link rel="preconnect" href="https://huggingface.co" crossorigin />
   <link rel="dns-prefetch" href="https://cdn-lfs.huggingface.co" />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=block" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -39,7 +40,7 @@
   </div>
 
   <div class="controls">
-    <button class="iconbtn" id="installBtn" title="Install app" aria-label="Install" hidden><span class="glyph-install"></span></button>
+    <button class="iconbtn" id="installBtn" title="Install app" aria-label="Install" hidden><span class="material-symbols-outlined">install_mobile</span></button>
 
     <div class="switch" id="modeSwitch" role="switch" aria-label="Asset source" tabindex="0" title="Where models &amp; libraries load from">
       <span class="switch__track">
@@ -49,9 +50,9 @@
       </span>
     </div>
 
-    <button class="iconbtn" id="danceBtn" title="Make her dance" aria-label="Dance"><span aria-hidden="true">✦</span></button>
-    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="themeglyph"></span></button>
-    <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="glyph-gear"></span></button>
+    <button class="iconbtn" id="danceBtn" title="Make her dance" aria-label="Dance"><span class="material-symbols-outlined">nightlife</span></button>
+    <button class="iconbtn" id="themeBtn" title="Toggle dark / light" aria-label="Toggle theme"><span class="material-symbols-outlined">dark_mode</span></button>
+    <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings"><span class="material-symbols-outlined">settings</span></button>
 
     <div class="statuspill" title="Runtime status">
       <span id="led" class="led"></span><span id="status">idle</span>
@@ -69,7 +70,7 @@
         <div class="onair" id="onair"><span class="onair__dot"></span><span id="onairTxt">STANDBY</span></div>
         <div class="hud__right">
           <label class="field"><span class="field__lbl">voice</span><select id="voice" class="select"></select></label>
-          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice"><span class="muteglyph"></span></button>
+          <button class="iconbtn iconbtn--sm" id="muteBtn" title="Mute voice" aria-label="Mute voice"><span class="material-symbols-outlined muteglyph">volume_up</span></button>
         </div>
       </div>
       <div class="hud__bottom">
@@ -92,7 +93,7 @@
     <div id="srAnnouncer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
     <div class="composer">
-      <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="glyph-mic"></span></button>
+      <button class="iconbtn iconbtn--mic" id="micBtn" title="Hold / click to speak" aria-label="Voice input"><span class="material-symbols-outlined">mic</span></button>
       <textarea id="input" placeholder="Say something — Enter to send · Shift+Enter newline · 🎙 to talk"></textarea>
       <div class="composer__send">
         <button class="btn btn--stop" id="stopBtn" title="Stop speaking" hidden>stop</button>
@@ -106,7 +107,7 @@
 <div id="settingsPanel" class="drawer" aria-hidden="true">
   <div class="drawer__scrim" data-close></div>
   <aside class="drawer__panel" role="dialog" aria-label="Settings">
-    <div class="drawer__head"><h2>Settings</h2><button class="iconbtn iconbtn--sm" data-close aria-label="Close">✕</button></div>
+    <div class="drawer__head"><h2>Settings</h2><button class="iconbtn iconbtn--sm" data-close aria-label="Close"><span class="material-symbols-outlined">close</span></button></div>
 
     <div class="set">
       <label class="set__row" for="voiceSel"><span>Voice</span></label>
